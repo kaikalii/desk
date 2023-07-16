@@ -56,6 +56,19 @@ pub const Token = union(TokenTy) {
     close_bracket,
     open_curly,
     close_curly,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        return switch (self) {
+            .ident => writer.print("ident({s})", .{self.ident}),
+            .num => writer.print("num({s})", .{self.num}),
+            .open_paren => writer.print("(", .{}),
+            .close_paren => writer.print(")", .{}),
+            .open_bracket => writer.print("[", .{}),
+            .close_bracket => writer.print("]", .{}),
+            .open_curly => writer.print("{{", .{}),
+            .close_curly => writer.print("}}", .{}),
+        };
+    }
 };
 
 pub const LexedFile = struct {
@@ -78,16 +91,15 @@ pub fn lexFile(path: []const u8, alloc: std.mem.Allocator) !LexedFile {
 }
 
 pub fn lex(path: []const u8, src: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Sp(Token)) {
-    const tokens = std.ArrayList(Sp(Token)).init(alloc);
     var lexer = Lexer{
         .loc = .{ .line = 1, .col = 1, .pos = 0 },
         .file = path,
         .src = src,
         .iter = (try std.unicode.Utf8View.init(src)).iterator(),
-        .tokens = tokens,
+        .tokens = std.ArrayList(Sp(Token)).init(alloc),
     };
     try lexer.go();
-    return tokens;
+    return lexer.tokens;
 }
 
 const Lexer = struct {

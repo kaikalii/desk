@@ -14,7 +14,7 @@ pub fn main() !void {
     defer lexed.deinit();
     std.debug.print("input:\n{s}", .{lexed.input});
 
-    std.debug.print("tokens:", .{});
+    std.debug.print("\n\ntokens:", .{});
     for (lexed.tokens.items) |token| {
         std.debug.print("\n  {}", .{token});
     }
