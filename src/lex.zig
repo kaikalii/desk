@@ -45,6 +45,11 @@ pub const TokenTy = enum {
     close_bracket,
     open_curly,
     close_curly,
+    colon,
+    semicolon,
+    comma,
+    dot,
+    equals,
 };
 
 pub const Token = union(TokenTy) {
@@ -56,6 +61,11 @@ pub const Token = union(TokenTy) {
     close_bracket,
     open_curly,
     close_curly,
+    colon,
+    semicolon,
+    comma,
+    dot,
+    equals,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         return switch (self) {
@@ -67,6 +77,11 @@ pub const Token = union(TokenTy) {
             .close_bracket => writer.print("]", .{}),
             .open_curly => writer.print("{{", .{}),
             .close_curly => writer.print("}}", .{}),
+            .colon => writer.print(":", .{}),
+            .semicolon => writer.print(";", .{}),
+            .comma => writer.print(",", .{}),
+            .dot => writer.print(".", .{}),
+            .equals => writer.print("=", .{}),
         };
     }
 };
@@ -169,6 +184,11 @@ const Lexer = struct {
                 ']' => try self.addToken(start, .close_bracket),
                 '{' => try self.addToken(start, .open_curly),
                 '}' => try self.addToken(start, .close_curly),
+                ':' => try self.addToken(start, .colon),
+                ';' => try self.addToken(start, .semicolon),
+                ',' => try self.addToken(start, .comma),
+                '.' => try self.addToken(start, .dot),
+                '=' => try self.addToken(start, .equals),
                 else => {
                     if (isIdentHead(cp)) {
                         // Idents and keywords

@@ -1,5 +1,6 @@
 const std = @import("std");
 const lex = @import("lex.zig");
+const parse = @import("parse.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
