@@ -1,4 +1,4 @@
-layout global {
+shape global {
     a: u8
     b: usize
 }

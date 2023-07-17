@@ -20,13 +20,13 @@ pub const Ast = struct {
 
 // Items
 pub const Item = union(enum) {
-    layout: Layout,
+    shape: Shape,
     stmt: Stmt,
     put: Put,
 };
 
-// Layout
-pub const Layout = struct {
+// Shape
+pub const Shape = struct {
     name: []const u8,
     name_span: Span,
     fields: std.ArrayList(Field),
@@ -78,18 +78,18 @@ const Parser = struct {
     alloc: std.mem.Allocator,
 
     fn item(self: *Parser) Err!?Item {
-        if (try self.tryLayout()) |layout|
-            return .{ .layout = layout };
+        if (try self.tryShape()) |shape|
+            return .{ .shape = shape };
         if (try self.tryPut()) |put|
             return .{ .put = put };
         if (self.currToken()) |_| {
-            try self.expected(&.{ .{ .tag = .layout }, .{ .tag = .put } });
+            try self.expected(&.{ .{ .tag = .shape }, .{ .tag = .put } });
         }
         return null;
     }
 
-    fn tryLayout(self: *Parser) Err!?Layout {
-        _ = self.tryExact(.layout) orelse return null;
+    fn tryShape(self: *Parser) Err!?Shape {
+        _ = self.tryExact(.shape) orelse return null;
         // Name
         const name = try self.expectIdent(.name);
         // Fields

@@ -65,7 +65,7 @@ pub const Token = struct {
     tag: Tag,
     span: Span,
 
-    pub const keywords = [_]Tag{ .layout, .put };
+    pub const keywords = [_]Tag{ .shape, .put };
 
     pub const Tag = enum {
         ident,
@@ -87,7 +87,7 @@ pub const Token = struct {
         star,
         slash,
         // Keywords
-        layout,
+        shape,
         put,
 
         pub fn format(self: Tag, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
@@ -110,7 +110,7 @@ pub const Token = struct {
                 .minus => writer.print("`-`", .{}),
                 .star => writer.print("`*`", .{}),
                 .slash => writer.print("`/`", .{}),
-                .layout => writer.print("`layout`", .{}),
+                .shape => writer.print("`shape`", .{}),
                 .put => writer.print("`put`", .{}),
             };
         }
