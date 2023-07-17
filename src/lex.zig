@@ -90,7 +90,7 @@ pub const Token = struct {
         layout,
         put,
 
-        pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        pub fn format(self: Tag, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
             return switch (self) {
                 .ident => writer.print("identifier", .{}),
                 .num => writer.print("number", .{}),

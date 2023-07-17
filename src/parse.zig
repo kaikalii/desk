@@ -186,7 +186,7 @@ const Parser = struct {
         return .{ .x = x, .y = y, .z = z };
     }
 
-    fn currToken(self: *const Parser) ?Sp(Token) {
+    fn currToken(self: *const Parser) ?Token {
         if (self.curr_token >= self.lexed.tokens.items.len)
             return null;
         return self.lexed.tokens.items[self.curr_token];
@@ -194,7 +194,7 @@ const Parser = struct {
 
     fn tryExact(self: *Parser, tag: Token.Tag) ?Span {
         var token = self.currToken() orelse return null;
-        if (token.val == tag) {
+        if (token.tag == tag) {
             self.curr_token += 1;
             return token.span;
         }
@@ -202,7 +202,7 @@ const Parser = struct {
     }
 
     fn expect(self: *Parser, comptime tag: Token.Tag, comptime other_options: []const Expectation) Err!Span {
-        return self.expectOf(Span, self.tryExact(tag), .{.{ .token = tag }} ++ other_options);
+        return self.expectOf(Span, self.tryExact(tag), .{.{ .tag = tag }} ++ other_options);
     }
 
     fn expected(self: *Parser, comptime expectations: []const Expectation) Err!void {
@@ -215,10 +215,10 @@ const Parser = struct {
             try self.errors.append(.{
                 .kind = .{ .expected_found = .{
                     .expected = expectations,
-                    .found = if (token) |t| t.val else .eof,
+                    .found = if (token) |t| t else .{ .tag = .eof, .span = self.lastSpan() },
                 } },
                 .span = if (token) |t| t.span else blk: {
-                    var span = self.lexed.tokens.items[self.lexed.tokens.items.len - 1].span;
+                    var span = self.lastSpan();
                     span.start = span.end;
                     break :blk span;
                 },
@@ -227,12 +227,16 @@ const Parser = struct {
         };
     }
 
+    fn lastSpan(self: *Parser) Span {
+        return self.lexed.tokens.items[self.lexed.tokens.items.len - 1].span;
+    }
+
     fn tryIdent(self: *Parser) ?Sp([]const u8) {
         var token = self.currToken() orelse return null;
-        switch (token.val) {
-            .ident => |ident| {
+        switch (token.tag) {
+            .ident => {
                 self.curr_token += 1;
-                return token.span.sp([]const u8, ident);
+                return token.span.sp([]const u8, token.span.str());
             },
             else => return null,
         }
@@ -244,12 +248,12 @@ const Parser = struct {
 
     fn tryNum(self: *Parser, comptime T: type, default: T) Err!?Sp(T) {
         var token = self.currToken() orelse return null;
-        switch (token.val) {
-            .num => |num| {
+        switch (token.tag) {
+            .num => {
                 self.curr_token += 1;
-                const n = std.fmt.parseFloat(T, num) catch blk: {
+                const n = std.fmt.parseFloat(T, token.span.str()) catch blk: {
                     try self.errors.append(.{
-                        .kind = .{ .invalid_number = num },
+                        .kind = .{ .invalid_number = token.span.str() },
                         .span = token.span,
                     });
                     break :blk default;
