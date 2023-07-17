@@ -20,8 +20,17 @@ pub const Span = struct {
         try writer.print("{s}:{}", .{ self.file, self.start });
     }
 
-    pub fn sp(self: @This(), comptime T: type, val: T) T {
+    pub fn sp(self: @This(), comptime T: type, val: T) Sp(T) {
         return .{ .val = val, .span = self };
+    }
+
+    pub fn merge(self: @This(), other: Span) Span {
+        return .{
+            .start = self.start,
+            .end = other.end,
+            .file = self.file,
+            .src = self.src,
+        };
     }
 };
 
@@ -50,6 +59,28 @@ pub const TokenTy = enum {
     comma,
     dot,
     equals,
+    layout,
+    eof,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        return switch (self) {
+            .ident => writer.print("identifier", .{}),
+            .num => writer.print("number", .{}),
+            .open_paren => writer.print("`(`", .{}),
+            .close_paren => writer.print("`)`", .{}),
+            .open_bracket => writer.print("`[`", .{}),
+            .close_bracket => writer.print("`]`", .{}),
+            .open_curly => writer.print("`{{`", .{}),
+            .close_curly => writer.print("`}}`", .{}),
+            .colon => writer.print("`:`", .{}),
+            .semicolon => writer.print("`;`", .{}),
+            .comma => writer.print("`,`", .{}),
+            .dot => writer.print("`.`", .{}),
+            .equals => writer.print("`=`", .{}),
+            .layout => writer.print("`layout`", .{}),
+            .eof => writer.print("end of file", .{}),
+        };
+    }
 };
 
 pub const Token = union(TokenTy) {
@@ -66,23 +97,16 @@ pub const Token = union(TokenTy) {
     comma,
     dot,
     equals,
+    layout,
+    eof,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        return switch (self) {
-            .ident => writer.print("ident({s})", .{self.ident}),
-            .num => writer.print("num({s})", .{self.num}),
-            .open_paren => writer.print("(", .{}),
-            .close_paren => writer.print(")", .{}),
-            .open_bracket => writer.print("[", .{}),
-            .close_bracket => writer.print("]", .{}),
-            .open_curly => writer.print("{{", .{}),
-            .close_curly => writer.print("}}", .{}),
-            .colon => writer.print(":", .{}),
-            .semicolon => writer.print(";", .{}),
-            .comma => writer.print(",", .{}),
-            .dot => writer.print(".", .{}),
-            .equals => writer.print("=", .{}),
-        };
+        try writer.print("{}", .{@as(TokenTy, self)});
+        switch (self) {
+            .ident => try writer.print("({s})", .{self.ident}),
+            .num => try writer.print("({s})", .{self.num}),
+            else => {},
+        }
     }
 };
 
@@ -173,7 +197,7 @@ const Lexer = struct {
     }
 
     fn go(self: *Lexer) !void {
-        while (true) {
+        lex_loop: while (true) {
             const start = self.loc;
             const cp = self.next() orelse break;
             switch (cp[0]) {
@@ -194,6 +218,13 @@ const Lexer = struct {
                         // Idents and keywords
                         while (self.nextIf(isIdentTail)) |_| {}
                         const ident = self.src[start.pos..self.loc.pos];
+                        const keywords = .{Token.layout};
+                        inline for (keywords) |keyword| {
+                            if (std.mem.eql(u8, ident, @tagName(keyword))) {
+                                try self.addToken(start, keyword);
+                                continue :lex_loop;
+                            }
+                        }
                         try self.addToken(start, .{ .ident = ident });
                     } else if (isDigit(cp)) {
                         // Numbers

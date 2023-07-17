@@ -13,10 +13,19 @@ pub fn main() !void {
     // Lex
     const lexed = try lex.lexFile("examples/test.desk", alloc);
     defer lexed.deinit();
-    std.debug.print("input:\n{s}", .{lexed.input});
 
-    std.debug.print("\n\ntokens:", .{});
+    // Debug tokens
+    std.debug.print("tokens:\n", .{});
     for (lexed.tokens.items) |token| {
-        std.debug.print("\n  {}", .{token});
+        std.debug.print("  {}\n", .{token});
+    }
+    std.debug.print("\n", .{});
+
+    // Parse
+    const ast = parse.parse(&lexed, alloc);
+    defer ast.deinit();
+
+    for (ast.errors.items) |err| {
+        std.debug.print("{}\n", .{err});
     }
 }

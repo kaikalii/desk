@@ -1,3 +1,4 @@
-layout {
-    
+layout global {
+    a: u8
+    b: usize
 }
