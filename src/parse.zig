@@ -3,7 +3,6 @@ const lex = @import("lex.zig");
 const Sp = lex.Sp;
 const Span = lex.Span;
 const Token = lex.Token;
-const TokenTy = lex.TokenTy;
 
 /// The abstract syntax tree
 ///
@@ -134,7 +133,7 @@ const Parser = struct {
 
     fn tryAsExpr(self: *Parser) Err!?Expr {
         const lhs = try self.tryMdExpr() orelse return null;
-        for ([_]TokenTy{ .plus, .minus }, [_]BinOp{ .add, .sub }) |token, op| {
+        for ([_]Token.Tag{ .plus, .minus }, [_]BinOp{ .add, .sub }) |token, op| {
             if (self.tryExact(token)) |_| {
                 const rhs = try self.expectOf(Expr, try self.tryAsExpr(), &.{.expr});
                 const alloced = try self.alloc.create(BinExpr);
@@ -147,7 +146,7 @@ const Parser = struct {
 
     fn tryMdExpr(self: *Parser) Err!?Expr {
         const lhs = try self.tryTerm() orelse return null;
-        for ([_]TokenTy{ .star, .slash }, [_]BinOp{ .mul, .div }) |token, op| {
+        for ([_]Token.Tag{ .star, .slash }, [_]BinOp{ .mul, .div }) |token, op| {
             if (self.tryExact(token)) |_| {
                 const rhs = try self.expectOf(Expr, try self.tryMdExpr(), &.{.expr});
                 const alloced = try self.alloc.create(BinExpr);
@@ -193,17 +192,17 @@ const Parser = struct {
         return self.lexed.tokens.items[self.curr_token];
     }
 
-    fn tryExact(self: *Parser, token_ty: TokenTy) ?Span {
+    fn tryExact(self: *Parser, tag: Token.Tag) ?Span {
         var token = self.currToken() orelse return null;
-        if (token.val == token_ty) {
+        if (token.val == tag) {
             self.curr_token += 1;
             return token.span;
         }
         return null;
     }
 
-    fn expect(self: *Parser, comptime token_ty: TokenTy, comptime other_options: []const Expectation) Err!Span {
-        return self.expectOf(Span, self.tryExact(token_ty), .{.{ .token = token_ty }} ++ other_options);
+    fn expect(self: *Parser, comptime tag: Token.Tag, comptime other_options: []const Expectation) Err!Span {
+        return self.expectOf(Span, self.tryExact(tag), .{.{ .token = tag }} ++ other_options);
     }
 
     fn expected(self: *Parser, comptime expectations: []const Expectation) Err!void {
@@ -268,7 +267,7 @@ const Parser = struct {
 
 // Expectations
 pub const Expectation = union(enum) {
-    token: TokenTy,
+    tag: Token.Tag,
     name,
     field,
     ty,
@@ -278,7 +277,7 @@ pub const Expectation = union(enum) {
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
-            .token => |token_ty| try writer.print("{}", .{token_ty}),
+            .tag => |tag| try writer.print("{}", .{tag}),
             .name => try writer.print("name", .{}),
             .field => try writer.print("field", .{}),
             .ty => try writer.print("type", .{}),

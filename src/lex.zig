@@ -3,7 +3,15 @@ const std = @import("std");
 pub const Loc = struct {
     line: usize,
     col: usize,
-    pos: usize,
+
+    pub fn inSrc(src: []const u8, pos: usize) Loc {
+        var line = 0;
+        for (src[0..pos]) |c| {
+            if (c == '\n') line += 1;
+            pos -= 1;
+        }
+        return .{ .line = line, .col = pos };
+    }
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{}:{}", .{ self.line, self.col });
@@ -11,13 +19,21 @@ pub const Loc = struct {
 };
 
 pub const Span = struct {
-    start: Loc,
-    end: Loc,
+    start: usize,
+    end: usize,
     file: []const u8,
     src: []const u8,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{s}:{}", .{ self.file, self.start });
+    }
+
+    pub fn str(self: @This()) []const u8 {
+        return self.src[self.start..self.end];
+    }
+
+    pub fn startLoc(self: @This()) Loc {
+        return Loc.inSrc(self.src, self.start);
     }
 
     pub fn sp(self: @This(), comptime T: type, val: T) Sp(T) {
@@ -45,91 +61,72 @@ pub fn Sp(comptime T: type) type {
     };
 }
 
-pub const TokenTy = enum {
-    ident,
-    num,
-    open_paren,
-    close_paren,
-    open_bracket,
-    close_bracket,
-    open_curly,
-    close_curly,
-    colon,
-    semicolon,
-    comma,
-    dot,
-    equals,
-    eof,
-    plus,
-    minus,
-    star,
-    slash,
-    // Keywords
-    layout,
-    put,
+pub const Token = struct {
+    tag: Tag,
+    span: Span,
+
+    pub const keywords = [_]Tag{ .layout, .put };
+
+    pub const Tag = enum {
+        ident,
+        num,
+        open_paren,
+        close_paren,
+        open_bracket,
+        close_bracket,
+        open_curly,
+        close_curly,
+        colon,
+        semicolon,
+        comma,
+        dot,
+        equals,
+        eof,
+        plus,
+        minus,
+        star,
+        slash,
+        // Keywords
+        layout,
+        put,
+
+        pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+            return switch (self) {
+                .ident => writer.print("identifier", .{}),
+                .num => writer.print("number", .{}),
+                .open_paren => writer.print("`(`", .{}),
+                .close_paren => writer.print("`)`", .{}),
+                .open_bracket => writer.print("`[`", .{}),
+                .close_bracket => writer.print("`]`", .{}),
+                .open_curly => writer.print("`{{`", .{}),
+                .close_curly => writer.print("`}}`", .{}),
+                .colon => writer.print("`:`", .{}),
+                .semicolon => writer.print("`;`", .{}),
+                .comma => writer.print("`,`", .{}),
+                .dot => writer.print("`.`", .{}),
+                .equals => writer.print("`=`", .{}),
+                .eof => writer.print("end of file", .{}),
+                .plus => writer.print("`+`", .{}),
+                .minus => writer.print("`-`", .{}),
+                .star => writer.print("`*`", .{}),
+                .slash => writer.print("`/`", .{}),
+                .layout => writer.print("`layout`", .{}),
+                .put => writer.print("`put`", .{}),
+            };
+        }
+    };
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        return switch (self) {
-            .ident => writer.print("identifier", .{}),
-            .num => writer.print("number", .{}),
-            .open_paren => writer.print("`(`", .{}),
-            .close_paren => writer.print("`)`", .{}),
-            .open_bracket => writer.print("`[`", .{}),
-            .close_bracket => writer.print("`]`", .{}),
-            .open_curly => writer.print("`{{`", .{}),
-            .close_curly => writer.print("`}}`", .{}),
-            .colon => writer.print("`:`", .{}),
-            .semicolon => writer.print("`;`", .{}),
-            .comma => writer.print("`,`", .{}),
-            .dot => writer.print("`.`", .{}),
-            .equals => writer.print("`=`", .{}),
-            .eof => writer.print("end of file", .{}),
-            .plus => writer.print("`+`", .{}),
-            .minus => writer.print("`-`", .{}),
-            .star => writer.print("`*`", .{}),
-            .slash => writer.print("`/`", .{}),
-            .layout => writer.print("`layout`", .{}),
-            .put => writer.print("`put`", .{}),
-        };
-    }
-};
-
-const keywords: []const TokenTy = &.{ .layout, .put };
-
-pub const Token = union(TokenTy) {
-    ident: []const u8,
-    num: []const u8,
-    open_paren,
-    close_paren,
-    open_bracket,
-    close_bracket,
-    open_curly,
-    close_curly,
-    colon,
-    semicolon,
-    comma,
-    dot,
-    equals,
-    eof,
-    plus,
-    minus,
-    star,
-    slash,
-    // Keywords
-    layout,
-    put,
-
-    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        switch (self) {
-            .ident => try writer.print("`{s}`", .{self.ident}),
-            .num => try writer.print("`{s}`", .{self.num}),
-            else => try writer.print("{}", .{@as(TokenTy, self)}),
+        switch (self.tag) {
+            .ident => try writer.print("`{s}`", .{self.span.str()}),
+            .num => try writer.print("`{s}`", .{self.span.str()}),
+            else => try writer.print("{}", .{self.tag}),
         }
     }
 };
 
 pub const LexedFile = struct {
-    tokens: std.ArrayList(Sp(Token)),
+    tokens: std.ArrayList(Token),
     input: []const u8,
     alloc: std.mem.Allocator,
 
@@ -147,39 +144,31 @@ pub fn lexFile(path: []const u8, alloc: std.mem.Allocator) !LexedFile {
     return .{ .tokens = tokens, .input = input, .alloc = alloc };
 }
 
-pub fn lex(path: []const u8, src: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Sp(Token)) {
+pub fn lex(path: []const u8, src: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Token) {
     var lexer = Lexer{
-        .loc = .{ .line = 1, .col = 1, .pos = 0 },
+        .curr = 0,
         .file = path,
         .src = src,
         .iter = (try std.unicode.Utf8View.init(src)).iterator(),
-        .tokens = std.ArrayList(Sp(Token)).init(alloc),
+        .tokens = std.ArrayList(Token).init(alloc),
     };
     try lexer.go();
     return lexer.tokens;
 }
 
 const Lexer = struct {
-    loc: Loc,
+    curr: usize,
     file: []const u8,
     src: []const u8,
     iter: std.unicode.Utf8Iterator,
-    tokens: std.ArrayList(Sp(Token)),
+    tokens: std.ArrayList(Token),
 
     fn currChar(self: *Lexer) []const u8 {
         return self.iter.peek(1);
     }
 
     fn progress(self: *Lexer, cp: []const u8) void {
-        switch (cp[0]) {
-            '\n' => {
-                self.loc.line += 1;
-                self.loc.col = 1;
-            },
-            '\r' => {},
-            else => self.loc.col += 1,
-        }
-        self.loc.pos += cp.len;
+        self.curr += cp.len;
         _ = self.iter.nextCodepoint();
     }
 
@@ -210,14 +199,14 @@ const Lexer = struct {
         return true;
     }
 
-    fn addToken(self: *Lexer, start: Loc, token: Token) !void {
-        const span = .{ .start = start, .end = self.loc, .file = self.file, .src = self.src };
-        try self.tokens.append(.{ .val = token, .span = span });
+    fn addToken(self: *Lexer, start: usize, tag: Token.Tag) !void {
+        const span = .{ .start = start, .end = self.curr, .file = self.file, .src = self.src };
+        try self.tokens.append(.{ .tag = tag, .span = span });
     }
 
     fn go(self: *Lexer) !void {
         lex_loop: while (true) {
-            const start = self.loc;
+            const start = self.curr;
             const cp = self.next() orelse break;
             switch (cp[0]) {
                 ' ', '\t', '\r', '\n' => {},
@@ -240,14 +229,14 @@ const Lexer = struct {
                     if (isIdentHead(cp)) {
                         // Idents and keywords
                         while (self.nextIf(isIdentTail)) |_| {}
-                        const ident = self.src[start.pos..self.loc.pos];
-                        inline for (keywords) |keyword| {
+                        const ident = self.src[start..self.curr];
+                        inline for (Token.keywords) |keyword| {
                             if (std.mem.eql(u8, ident, @tagName(keyword))) {
                                 try self.addToken(start, keyword);
                                 continue :lex_loop;
                             }
                         }
-                        try self.addToken(start, .{ .ident = ident });
+                        try self.addToken(start, .ident);
                     } else if (isDigit(cp)) {
                         // Numbers
                         // Whole part
@@ -261,8 +250,7 @@ const Lexer = struct {
                             _ = self.nextIfIn("+-");
                             while (self.nextIf(isDigit)) |_| {}
                         }
-                        const num = self.src[start.pos..self.loc.pos];
-                        try self.addToken(start, .{ .num = num });
+                        try self.addToken(start, .num);
                     }
                 },
             }
