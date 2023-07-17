@@ -37,42 +37,32 @@ pub const Layout = struct {
     name_span: Span,
     fields: std.ArrayList(Field),
 };
-pub const Field = struct {
-    name: []const u8,
-    ty: Type,
-};
+pub const Field = struct { name: []const u8, ty: Type };
 pub const Type = []const u8;
 
 // Statements
-pub const StmtTy = enum {
-    expr,
-};
-pub const Stmt = union(StmtTy) {
-    expr: Expr,
-};
+pub const StmtTy = enum { expr };
+pub const Stmt = union(StmtTy) { expr: Expr };
+pub const Put = struct { name: []const u8, at: Expr };
 
 // Expressions
 pub const ExprTy = enum {
     ident,
     num,
     vec,
+    bin,
+    paren,
 };
 pub const Expr = union(ExprTy) {
     ident: []const u8,
     num: f64,
     vec: *VecExpr,
+    bin: *BinExpr,
+    paren: *Expr,
 };
-
-pub const Put = struct {
-    name: []const u8,
-    at: Expr,
-};
-
-pub const VecExpr = struct {
-    x: Expr,
-    y: Expr,
-    z: Expr,
-};
+pub const VecExpr = struct { x: Expr, y: Expr, z: Expr };
+pub const BinOp = enum { add, sub, mul, div };
+pub const BinExpr = struct { op: BinOp, lhs: Expr, rhs: Expr };
 
 /// Parse tokens into an abstract syntax tree
 pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
@@ -151,8 +141,37 @@ const Parser = struct {
     fn expectExpr(self: *Parser) Err!Expr {
         return self.expectOf(Expr, try self.tryExpr(), &.{.expr});
     }
-
     fn tryExpr(self: *Parser) Err!?Expr {
+        return self.tryAsExpr();
+    }
+
+    fn tryAsExpr(self: *Parser) Err!?Expr {
+        const lhs = try self.tryMdExpr() orelse return null;
+        for ([_]TokenTy{ .plus, .minus }, [_]BinOp{ .add, .sub }) |token, op| {
+            if (self.tryExact(token)) |_| {
+                const rhs = try self.expectOf(Expr, try self.tryAsExpr(), &.{.expr});
+                const alloced = try self.alloc.create(BinExpr);
+                alloced.* = .{ .op = op, .lhs = lhs, .rhs = rhs };
+                return .{ .bin = alloced };
+            }
+        }
+        return lhs;
+    }
+
+    fn tryMdExpr(self: *Parser) Err!?Expr {
+        const lhs = try self.tryTerm() orelse return null;
+        for ([_]TokenTy{ .star, .slash }, [_]BinOp{ .mul, .div }) |token, op| {
+            if (self.tryExact(token)) |_| {
+                const rhs = try self.expectOf(Expr, try self.tryMdExpr(), &.{.expr});
+                const alloced = try self.alloc.create(BinExpr);
+                alloced.* = .{ .op = op, .lhs = lhs, .rhs = rhs };
+                return .{ .bin = alloced };
+            }
+        }
+        return lhs;
+    }
+
+    fn tryTerm(self: *Parser) Err!?Expr {
         if (self.tryIdent()) |ident|
             return .{ .ident = ident.val };
         if (try self.tryNum(f64, 0.0)) |num|
@@ -161,6 +180,13 @@ const Parser = struct {
             const alloced = try self.alloc.create(VecExpr);
             alloced.* = vec;
             return .{ .vec = alloced };
+        }
+        if (self.tryExact(.open_paren)) |_| {
+            const expr = try self.expectExpr();
+            _ = try self.expect(.close_paren, &.{});
+            const alloced = try self.alloc.create(Expr);
+            alloced.* = expr;
+            return .{ .paren = alloced };
         }
         return null;
     }
@@ -205,7 +231,11 @@ const Parser = struct {
                     .expected = expectations,
                     .found = if (token) |t| t.val else .eof,
                 } },
-                .span = if (token) |t| t.span else null,
+                .span = if (token) |t| t.span else blk: {
+                    var span = self.lexed.tokens.items[self.lexed.tokens.items.len - 1].span;
+                    span.start = span.end;
+                    break :blk span;
+                },
             });
             return error.err;
         };
@@ -308,11 +338,11 @@ pub const ParseErrorCause = union(ParseErrorKind) {
 };
 pub const ParseError = struct {
     cause: ParseErrorCause,
-    span: ?Span,
+    span: Span,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("error", .{});
-        if (self.span) |s| try writer.print(" at {}", .{s});
+        try writer.print(" at {}", .{self.span});
         try writer.print(": ", .{});
         try writer.print("{}", .{self.cause});
     }

@@ -60,6 +60,10 @@ pub const TokenTy = enum {
     dot,
     equals,
     eof,
+    plus,
+    minus,
+    star,
+    slash,
     // Keywords
     layout,
     put,
@@ -80,6 +84,10 @@ pub const TokenTy = enum {
             .dot => writer.print("`.`", .{}),
             .equals => writer.print("`=`", .{}),
             .eof => writer.print("end of file", .{}),
+            .plus => writer.print("`+`", .{}),
+            .minus => writer.print("`-`", .{}),
+            .star => writer.print("`*`", .{}),
+            .slash => writer.print("`/`", .{}),
             .layout => writer.print("`layout`", .{}),
             .put => writer.print("`put`", .{}),
         };
@@ -103,6 +111,11 @@ pub const Token = union(TokenTy) {
     dot,
     equals,
     eof,
+    plus,
+    minus,
+    star,
+    slash,
+    // Keywords
     layout,
     put,
 
@@ -219,6 +232,10 @@ const Lexer = struct {
                 ',' => try self.addToken(start, .comma),
                 '.' => try self.addToken(start, .dot),
                 '=' => try self.addToken(start, .equals),
+                '+' => try self.addToken(start, .plus),
+                '-' => try self.addToken(start, .minus),
+                '*' => try self.addToken(start, .star),
+                '/' => try self.addToken(start, .slash),
                 else => {
                     if (isIdentHead(cp)) {
                         // Idents and keywords
