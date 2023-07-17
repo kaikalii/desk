@@ -3,4 +3,4 @@ shape global {
     b: usize
 }
 
-wow
+layout global {0 0 0}

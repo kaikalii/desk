@@ -65,7 +65,7 @@ pub const Token = struct {
     tag: Tag,
     span: Span,
 
-    pub const keywords = [_]Tag{ .shape, .put };
+    pub const keywords = [_]Tag{ .shape, .layout };
 
     pub const Tag = enum {
         ident,
@@ -88,7 +88,7 @@ pub const Token = struct {
         slash,
         // Keywords
         shape,
-        put,
+        layout,
 
         pub fn format(self: Tag, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
             return switch (self) {
@@ -111,7 +111,7 @@ pub const Token = struct {
                 .star => writer.print("`*`", .{}),
                 .slash => writer.print("`/`", .{}),
                 .shape => writer.print("`shape`", .{}),
-                .put => writer.print("`put`", .{}),
+                .layout => writer.print("`layout`", .{}),
             };
         }
     };
@@ -127,21 +127,21 @@ pub const Token = struct {
 
 pub const LexedFile = struct {
     tokens: std.ArrayList(Token),
-    input: []const u8,
+    inlayout: []const u8,
     alloc: std.mem.Allocator,
 
     pub fn deinit(self: *const LexedFile) void {
         self.tokens.deinit();
-        self.alloc.free(self.input);
+        self.alloc.free(self.inlayout);
     }
 };
 
 pub fn lexFile(path: []const u8, alloc: std.mem.Allocator) !LexedFile {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
-    const input = try file.readToEndAlloc(alloc, std.math.maxInt(usize));
-    const tokens = try lex(path, input, alloc);
-    return .{ .tokens = tokens, .input = input, .alloc = alloc };
+    const inlayout = try file.readToEndAlloc(alloc, std.math.maxInt(usize));
+    const tokens = try lex(path, inlayout, alloc);
+    return .{ .tokens = tokens, .inlayout = inlayout, .alloc = alloc };
 }
 
 pub fn lex(path: []const u8, src: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Token) {

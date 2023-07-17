@@ -22,7 +22,7 @@ pub const Ast = struct {
 pub const Item = union(enum) {
     shape: Shape,
     stmt: Stmt,
-    put: Put,
+    layout: Layout,
 };
 
 // Shape
@@ -36,7 +36,7 @@ pub const Type = []const u8;
 
 // Statements
 pub const Stmt = union(enum) { expr: Expr };
-pub const Put = struct { name: []const u8, at: Expr };
+pub const Layout = struct { name: []const u8, at: Expr };
 
 // Expressions
 pub const Expr = union(enum) {
@@ -80,10 +80,10 @@ const Parser = struct {
     fn item(self: *Parser) Err!?Item {
         if (try self.tryShape()) |shape|
             return .{ .shape = shape };
-        if (try self.tryPut()) |put|
-            return .{ .put = put };
+        if (try self.tryLayout()) |layout|
+            return .{ .layout = layout };
         if (self.currToken()) |_| {
-            try self.expected(&.{ .{ .tag = .shape }, .{ .tag = .put } });
+            try self.expected(&.{ .{ .tag = .shape }, .{ .tag = .layout } });
         }
         return null;
     }
@@ -117,8 +117,8 @@ const Parser = struct {
         return null;
     }
 
-    fn tryPut(self: *Parser) Err!?Put {
-        _ = self.tryExact(.put) orelse return null;
+    fn tryLayout(self: *Parser) Err!?Layout {
+        _ = self.tryExact(.layout) orelse return null;
         return .{
             .name = (try self.expectIdent(.name)).val,
             .at = try self.expectExpr(),
