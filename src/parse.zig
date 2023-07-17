@@ -80,10 +80,11 @@ const Parser = struct {
     fn item(self: *Parser) Err!?Item {
         if (try self.tryLayout()) |layout|
             return .{ .layout = layout };
-        if (try self.tryStmt()) |stmt|
-            return .{ .stmt = stmt };
         if (try self.tryPut()) |put|
             return .{ .put = put };
+        if (self.currToken()) |_| {
+            try self.expected(&.{ .{ .tag = .layout }, .{ .tag = .put } });
+        }
         return null;
     }
 
@@ -275,7 +276,6 @@ pub const Expectation = union(enum) {
     name,
     field,
     ty,
-    layout,
     stmt,
     expr,
 
@@ -285,7 +285,6 @@ pub const Expectation = union(enum) {
             .name => try writer.print("name", .{}),
             .field => try writer.print("field", .{}),
             .ty => try writer.print("type", .{}),
-            .layout => try writer.print("layout", .{}),
             .stmt => try writer.print("statement", .{}),
             .expr => try writer.print("expression", .{}),
         }

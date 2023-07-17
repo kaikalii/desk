@@ -3,4 +3,4 @@ layout global {
     b: usize
 }
 
-put global {0 0 0} + (2 * 3) 
+wow
