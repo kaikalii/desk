@@ -20,12 +20,7 @@ pub const Ast = struct {
 };
 
 // Items
-pub const ItemTy = enum {
-    layout,
-    stmt,
-    put,
-};
-pub const Item = union(ItemTy) {
+pub const Item = union(enum) {
     layout: Layout,
     stmt: Stmt,
     put: Put,
@@ -41,19 +36,11 @@ pub const Field = struct { name: []const u8, ty: Type };
 pub const Type = []const u8;
 
 // Statements
-pub const StmtTy = enum { expr };
-pub const Stmt = union(StmtTy) { expr: Expr };
+pub const Stmt = union(enum) { expr: Expr };
 pub const Put = struct { name: []const u8, at: Expr };
 
 // Expressions
-pub const ExprTy = enum {
-    ident,
-    num,
-    vec,
-    bin,
-    paren,
-};
-pub const Expr = union(ExprTy) {
+pub const Expr = union(enum) {
     ident: []const u8,
     num: f64,
     vec: *VecExpr,
@@ -227,7 +214,7 @@ const Parser = struct {
         return got orelse {
             const token = self.currToken();
             try self.errors.append(.{
-                .cause = .{ .expected_found = .{
+                .kind = .{ .expected_found = .{
                     .expected = expectations,
                     .found = if (token) |t| t.val else .eof,
                 } },
@@ -263,7 +250,7 @@ const Parser = struct {
                 self.curr_token += 1;
                 const n = std.fmt.parseFloat(T, num) catch blk: {
                     try self.errors.append(.{
-                        .cause = .{ .invalid_number = num },
+                        .kind = .{ .invalid_number = num },
                         .span = token.span,
                     });
                     break :blk default;
@@ -280,16 +267,7 @@ const Parser = struct {
 };
 
 // Expectations
-pub const ExpectationTy = enum {
-    token,
-    name,
-    field,
-    ty,
-    layout,
-    stmt,
-    expr,
-};
-pub const Expectation = union(ExpectationTy) {
+pub const Expectation = union(enum) {
     token: TokenTy,
     name,
     field,
@@ -312,11 +290,7 @@ pub const Expectation = union(ExpectationTy) {
 };
 
 // Errors
-pub const ParseErrorKind = enum {
-    expected_found,
-    invalid_number,
-};
-pub const ParseErrorCause = union(ParseErrorKind) {
+pub const ParseErrorKind = union(enum) {
     expected_found: struct { expected: []const Expectation, found: Token },
     invalid_number: []const u8,
 
@@ -337,14 +311,14 @@ pub const ParseErrorCause = union(ParseErrorKind) {
     }
 };
 pub const ParseError = struct {
-    cause: ParseErrorCause,
+    kind: ParseErrorKind,
     span: Span,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("error", .{});
         try writer.print(" at {}", .{self.span});
         try writer.print(": ", .{});
-        try writer.print("{}", .{self.cause});
+        try writer.print("{}", .{self.kind});
     }
 };
 const Err = error{err} || std.mem.Allocator.Error;
