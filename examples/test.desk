@@ -2,3 +2,5 @@ layout global {
     a: u8
     b: usize
 }
+
+put global {0 0 0}

@@ -59,8 +59,10 @@ pub const TokenTy = enum {
     comma,
     dot,
     equals,
-    layout,
     eof,
+    // Keywords
+    layout,
+    put,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         return switch (self) {
@@ -77,11 +79,14 @@ pub const TokenTy = enum {
             .comma => writer.print("`,`", .{}),
             .dot => writer.print("`.`", .{}),
             .equals => writer.print("`=`", .{}),
-            .layout => writer.print("`layout`", .{}),
             .eof => writer.print("end of file", .{}),
+            .layout => writer.print("`layout`", .{}),
+            .put => writer.print("`put`", .{}),
         };
     }
 };
+
+const keywords: []const TokenTy = &.{ .layout, .put };
 
 pub const Token = union(TokenTy) {
     ident: []const u8,
@@ -97,15 +102,15 @@ pub const Token = union(TokenTy) {
     comma,
     dot,
     equals,
-    layout,
     eof,
+    layout,
+    put,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("{}", .{@as(TokenTy, self)});
         switch (self) {
-            .ident => try writer.print("({s})", .{self.ident}),
-            .num => try writer.print("({s})", .{self.num}),
-            else => {},
+            .ident => try writer.print("`{s}`", .{self.ident}),
+            .num => try writer.print("`{s}`", .{self.num}),
+            else => try writer.print("{}", .{@as(TokenTy, self)}),
         }
     }
 };
@@ -175,6 +180,7 @@ const Lexer = struct {
 
     fn nextIfIn(self: *Lexer, if_in: []const u8) bool {
         const cp = self.currChar();
+        if (cp.len == 0) return false;
         for (if_in) |c| {
             if (cp[0] == c) {
                 self.progress(cp);
@@ -218,7 +224,6 @@ const Lexer = struct {
                         // Idents and keywords
                         while (self.nextIf(isIdentTail)) |_| {}
                         const ident = self.src[start.pos..self.loc.pos];
-                        const keywords = .{Token.layout};
                         inline for (keywords) |keyword| {
                             if (std.mem.eql(u8, ident, @tagName(keyword))) {
                                 try self.addToken(start, keyword);
