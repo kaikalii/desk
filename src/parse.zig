@@ -42,7 +42,6 @@ pub const Type = union(enum) {
 
 // Statements
 pub const Stmt = union(enum) { expr: Expr };
-pub const Layout = struct { name: []const u8, at: Expr };
 
 // Expressions
 pub const Expr = union(enum) {

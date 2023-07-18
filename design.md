@@ -1,4 +1,4 @@
-# Premise
+# The Grid
 
 All program data exists in a conceptual 3D grid. The X and Y dimensions are fixed at compile time, but the Z dimension is dynamic.
 
