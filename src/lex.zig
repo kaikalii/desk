@@ -71,7 +71,7 @@ pub const Token = struct {
     tag: Tag,
     span: Span,
 
-    pub const keywords = [_]Tag{ .shape, .layout, .origin, .proc };
+    pub const keywords = [_]Tag{ .shape, .origin, .proc };
 
     pub const Tag = enum {
         unknown,
@@ -97,7 +97,6 @@ pub const Token = struct {
         slash,
         // Keywords
         shape,
-        layout,
         origin,
         proc,
 
@@ -125,7 +124,6 @@ pub const Token = struct {
                 .star => writer.print("`*`", .{}),
                 .slash => writer.print("`/`", .{}),
                 .shape => writer.print("`shape`", .{}),
-                .layout => writer.print("`layout`", .{}),
                 .origin => writer.print("`origin`", .{}),
                 .proc => writer.print("`proc`", .{}),
             };
