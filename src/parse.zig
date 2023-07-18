@@ -22,6 +22,7 @@ pub const Ast = struct {
 pub const Item = union(enum) {
     field: Field,
     shape: Shape,
+    proc: Proc,
 };
 
 // Shape
@@ -49,8 +50,30 @@ pub const Type = union(enum) {
     array: struct { axis: ?Axis, len: Expr, ty: *Type },
 };
 
+// Proc
+pub const Proc = struct {
+    name: []const u8,
+    name_span: Span,
+    params: std.ArrayList(Sp([]const u8)),
+    body: std.ArrayList(Stmt),
+};
+
 // Statements
-pub const Stmt = union(enum) { expr: Expr };
+pub const Stmt = union(enum) {
+    call: Call,
+    arg: Arg,
+};
+pub const Call = struct {
+    proc: []const u8,
+    proc_span: Span,
+    args: std.ArrayList(Arg),
+};
+pub const Arg = union(enum) {
+    ident: []const u8,
+    num: f64,
+    raw_len: []const u8,
+    typed_len: []const u8,
+};
 
 // Expressions
 pub const Expr = union(enum) {
@@ -103,6 +126,8 @@ const Parser = struct {
             return .{ .shape = shape };
         if (try self.tryField()) |field|
             return .{ .field = field };
+        if (try self.tryProc()) |proc|
+            return .{ .proc = proc };
         return null;
     }
 
@@ -159,9 +184,51 @@ const Parser = struct {
         return null;
     }
 
+    fn tryProc(self: *Parser) Err!?Proc {
+        _ = self.tryExact(.proc) orelse return null;
+        const name = try self.expectIdent(.name);
+        var params = std.ArrayList(Sp([]const u8)).init(self.alloc);
+        errdefer params.deinit();
+        while (self.tryIdent()) |param| {
+            try params.append(param);
+        }
+        _ = try self.expect(.open_curly, &.{.param});
+        var body = std.ArrayList(Stmt).init(self.alloc);
+        errdefer body.deinit();
+        while (try self.tryStmt()) |stmt| {
+            try body.append(stmt);
+            _ = self.expect(.semicolon, &.{}) catch {};
+        }
+        _ = try self.expect(.close_curly, &.{.stmt});
+        return .{
+            .name = name.val,
+            .name_span = name.span,
+            .params = params,
+            .body = body,
+        };
+    }
+
     fn tryStmt(self: *Parser) Err!?Stmt {
-        if (try self.tryExpr()) |expr|
-            return .{ .expr = expr };
+        if (try self.tryCall()) |call|
+            return .{ .call = call };
+        return null;
+    }
+
+    fn tryCall(self: *Parser) Err!?Call {
+        const proc = self.tryIdent() orelse return null;
+        var args = std.ArrayList(Arg).init(self.alloc);
+        errdefer args.deinit();
+        while (try self.tryArg()) |arg|
+            try args.append(arg);
+        return .{ .proc = proc.val, .proc_span = proc.span, .args = args };
+    }
+
+    fn tryArg(self: *Parser) Err!?Arg {
+        if (self.tryIdent()) |ident|
+            return .{ .ident = ident.val };
+        if (try self.tryNum(f64, 0.0)) |num|
+            return .{ .num = num.val };
+        // TODO: other args
         return null;
     }
 
@@ -370,6 +437,8 @@ pub const Expectation = union(enum) {
     stmt,
     expr,
     axis,
+    param,
+    arg,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
@@ -380,6 +449,8 @@ pub const Expectation = union(enum) {
             .stmt => try writer.print("statement", .{}),
             .expr => try writer.print("expression", .{}),
             .axis => try writer.print("axis", .{}),
+            .param => try writer.print("parameter", .{}),
+            .arg => try writer.print("argument", .{}),
         }
     }
 };

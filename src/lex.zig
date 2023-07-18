@@ -61,7 +61,8 @@ pub fn Sp(comptime T: type) type {
         span: Span,
 
         pub fn format(self: @This(), comptime s: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-            try writer.print("{}: {" ++ s ++ "}", .{ self.span, self.val });
+            const ss = if (s.len == 0) "s" else s;
+            try writer.print("{}: {" ++ ss ++ "}", .{ self.span, self.val });
         }
     };
 }
@@ -70,7 +71,7 @@ pub const Token = struct {
     tag: Tag,
     span: Span,
 
-    pub const keywords = [_]Tag{ .shape, .layout, .origin, .proc, .@"for" };
+    pub const keywords = [_]Tag{ .shape, .layout, .origin, .proc };
 
     pub const Tag = enum {
         ident,
@@ -96,7 +97,6 @@ pub const Token = struct {
         layout,
         origin,
         proc,
-        @"for",
 
         pub fn format(self: Tag, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
             return switch (self) {
@@ -122,7 +122,6 @@ pub const Token = struct {
                 .layout => writer.print("`layout`", .{}),
                 .origin => writer.print("`origin`", .{}),
                 .proc => writer.print("`proc`", .{}),
-                .@"for" => writer.print("`for`", .{}),
             };
         }
     };

@@ -1,22 +1,13 @@
 shape Person {
-    shape Name [30]u8
+    shape Name [30]byte
     name Name origin
-    age u16 name:x
+    age int name:x
 }
 
 people [z 1000]Person origin
 
-proc add_person(name Person.Name, age u16) {
-    push people {
-        name = name
-        age = age
-    }
-}
-
-proc avg(nums []f64, to f64) {
-    sum f64 = 0
-    for num in nums {
-        sum += num
-    }
-    set to = sum / len(nums)
+proc avg nums res {
+    set res 0;
+    fold add nums res;
+    div res #nums res;
 }
