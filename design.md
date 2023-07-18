@@ -4,6 +4,4 @@ All program data exists in a conceptual 3D grid. The X and Y dimensions are fixe
 
 Instead of defining structs, you define `shape`s. A shape is an arrangement of typed data.
 
-Shapes are allocated in the grid at compile time using the `layout` keyword. `layout` takes a shape name and a position in the grid.
-
-Refering to shapes that have been laid out returns their laid out position.
+Shapes are allocated in the grid at compile time by being children of the root shape.

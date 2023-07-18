@@ -1,6 +1,6 @@
-shape global {
-    a: u8
-    b: usize
+shape person {
+    name [x 30]u8 origin
+    age u16 name:x
 }
 
-layout global {0 0 0}
+people [z 1000]person origin

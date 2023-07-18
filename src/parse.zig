@@ -20,19 +20,25 @@ pub const Ast = struct {
 
 // Items
 pub const Item = union(enum) {
+    field: Field,
     shape: Shape,
-    stmt: Stmt,
-    layout: Layout,
 };
 
 // Shape
 pub const Shape = struct {
     name: []const u8,
     name_span: Span,
-    fields: std.ArrayList(Field),
+    items: std.ArrayList(Item),
 };
-pub const Field = struct { name: []const u8, ty: Type };
-pub const Type = []const u8;
+pub const Field = struct {
+    name: []const u8,
+    ty: Type,
+    start: Expr,
+};
+pub const Type = union(enum) {
+    named: []const u8,
+    array: struct { axis: Axis, len: Expr, ty: *Type },
+};
 
 // Statements
 pub const Stmt = union(enum) { expr: Expr };
@@ -44,11 +50,14 @@ pub const Expr = union(enum) {
     num: f64,
     vec: *VecExpr,
     bin: *BinExpr,
+    axis: *AxisExpr,
     paren: *Expr,
 };
 pub const VecExpr = struct { x: Expr, y: Expr, z: Expr };
 pub const BinOp = enum { add, sub, mul, div };
 pub const BinExpr = struct { op: BinOp, lhs: Expr, rhs: Expr };
+pub const Axis = enum { x, y, z };
+pub const AxisExpr = struct { vec: Expr, axis: Axis };
 
 /// Parse tokens into an abstract syntax tree
 pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
@@ -57,14 +66,18 @@ pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
     var parser = Parser{
         .lexed = lexed,
         .curr_token = 0,
-        .items = std.ArrayList(Item).init(alloc),
+        .root_items = std.ArrayList(Item).init(alloc),
         .errors = std.ArrayList(ParseError).init(alloc),
         .alloc = arena.allocator(),
     };
-    while (parser.item() catch null) |item|
-        parser.items.append(item) catch break;
+    // Parse root items
+    while (parser.tryItem() catch null) |item|
+        parser.root_items.append(item) catch break;
+    // Make sure all tokens were consumed
+    if (parser.currToken()) |_|
+        parser.expected(&.{ .field, .{ .tag = .shape } }) catch {};
     return .{
-        .items = parser.items,
+        .items = parser.root_items,
         .errors = parser.errors,
         .arena = arena,
     };
@@ -73,56 +86,64 @@ pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
 const Parser = struct {
     lexed: *const lex.LexedFile,
     curr_token: usize,
-    items: std.ArrayList(Item),
+    root_items: std.ArrayList(Item),
     errors: std.ArrayList(ParseError),
     alloc: std.mem.Allocator,
 
-    fn item(self: *Parser) Err!?Item {
+    fn tryItem(self: *Parser) Err!?Item {
         if (try self.tryShape()) |shape|
             return .{ .shape = shape };
-        if (try self.tryLayout()) |layout|
-            return .{ .layout = layout };
-        if (self.currToken()) |_| {
-            try self.expected(&.{ .{ .tag = .shape }, .{ .tag = .layout } });
-        }
+        if (try self.tryField()) |field|
+            return .{ .field = field };
         return null;
+    }
+
+    fn tryField(self: *Parser) Err!?Field {
+        const ident = self.tryIdent() orelse return null;
+        const ty = try self.expectType();
+        const start = try self.expectExpr();
+        return .{ .name = ident.val, .ty = ty, .start = start };
     }
 
     fn tryShape(self: *Parser) Err!?Shape {
         _ = self.tryExact(.shape) orelse return null;
         // Name
         const name = try self.expectIdent(.name);
-        // Fields
+        // Items
         _ = try self.expect(.open_curly, &.{});
-        var fields = std.ArrayList(Field).init(self.alloc);
-        while (self.tryIdent()) |ident| {
-            _ = try self.expect(.colon, &.{});
-            const ty = try self.expectIdent(.ty);
-            try fields.append(.{
-                .name = ident.val,
-                .ty = ty.val,
-            });
-        }
-        _ = try self.expect(.close_curly, &.{.field});
+        var items = std.ArrayList(Item).init(self.alloc);
+        while (try self.tryItem()) |item|
+            try items.append(item);
+        _ = try self.expect(.close_curly, &.{ .field, .{ .tag = .shape } });
         return .{
             .name = name.val,
             .name_span = name.span,
-            .fields = fields,
+            .items = items,
         };
+    }
+
+    fn expectType(self: *Parser) Err!Type {
+        return self.expectOf(Type, try self.tryType(), &.{.ty});
+    }
+    fn tryType(self: *Parser) Err!?Type {
+        if (self.tryIdent()) |ident|
+            return .{ .named = ident.val };
+        if (self.tryExact(.open_bracket)) |_| {
+            const axis = try self.expectAxis();
+            const len = try self.expectExpr();
+            _ = try self.expect(.close_bracket, &.{});
+            const ty = try self.expectType();
+            var alloced = try self.alloc.create(Type);
+            alloced.* = ty;
+            return .{ .array = .{ .axis = axis.val, .len = len, .ty = alloced } };
+        }
+        return null;
     }
 
     fn tryStmt(self: *Parser) Err!?Stmt {
         if (try self.tryExpr()) |expr|
             return .{ .expr = expr };
         return null;
-    }
-
-    fn tryLayout(self: *Parser) Err!?Layout {
-        _ = self.tryExact(.layout) orelse return null;
-        return .{
-            .name = (try self.expectIdent(.name)).val,
-            .at = try self.expectExpr(),
-        };
     }
 
     fn expectExpr(self: *Parser) Err!Expr {
@@ -133,29 +154,47 @@ const Parser = struct {
     }
 
     fn tryAsExpr(self: *Parser) Err!?Expr {
-        const lhs = try self.tryMdExpr() orelse return null;
-        for ([_]Token.Tag{ .plus, .minus }, [_]BinOp{ .add, .sub }) |token, op| {
-            if (self.tryExact(token)) |_| {
-                const rhs = try self.expectOf(Expr, try self.tryAsExpr(), &.{.expr});
-                const alloced = try self.alloc.create(BinExpr);
-                alloced.* = .{ .op = op, .lhs = lhs, .rhs = rhs };
-                return .{ .bin = alloced };
-            }
+        var lhs = try self.tryMdExpr() orelse return null;
+        while (try self.tryAsOp()) |op| {
+            const rhs = try self.expectOf(Expr, try self.tryMdExpr(), &.{.expr});
+            const alloced = try self.alloc.create(BinExpr);
+            alloced.* = .{ .op = op, .lhs = lhs, .rhs = rhs };
+            lhs = .{ .bin = alloced };
         }
         return lhs;
     }
+    fn tryAsOp(self: *Parser) Err!?BinOp {
+        if (self.tryExact(.plus)) |_| return .add;
+        if (self.tryExact(.minus)) |_| return .sub;
+        return null;
+    }
 
     fn tryMdExpr(self: *Parser) Err!?Expr {
-        const lhs = try self.tryTerm() orelse return null;
-        for ([_]Token.Tag{ .star, .slash }, [_]BinOp{ .mul, .div }) |token, op| {
-            if (self.tryExact(token)) |_| {
-                const rhs = try self.expectOf(Expr, try self.tryMdExpr(), &.{.expr});
-                const alloced = try self.alloc.create(BinExpr);
-                alloced.* = .{ .op = op, .lhs = lhs, .rhs = rhs };
-                return .{ .bin = alloced };
-            }
+        var lhs = try self.tryAxisExpr() orelse return null;
+        while (try self.tryMdOp()) |op| {
+            const rhs = try self.expectOf(Expr, try self.tryAxisExpr(), &.{.expr});
+            const alloced = try self.alloc.create(BinExpr);
+            alloced.* = .{ .op = op, .lhs = lhs, .rhs = rhs };
+            lhs = .{ .bin = alloced };
         }
         return lhs;
+    }
+    fn tryMdOp(self: *Parser) Err!?BinOp {
+        if (self.tryExact(.star)) |_| return .mul;
+        if (self.tryExact(.slash)) |_| return .div;
+        return null;
+    }
+
+    fn tryAxisExpr(self: *Parser) Err!?Expr {
+        const vec = try self.tryTerm() orelse return null;
+        if (self.tryExact(.colon)) |_| {
+            const axis = try self.expectAxis();
+            const alloced = try self.alloc.create(AxisExpr);
+            alloced.* = .{ .vec = vec, .axis = axis.val };
+            return .{ .axis = alloced };
+        } else {
+            return vec;
+        }
     }
 
     fn tryTerm(self: *Parser) Err!?Expr {
@@ -179,6 +218,9 @@ const Parser = struct {
     }
 
     fn tryVec(self: *Parser) Err!?VecExpr {
+        if (self.tryExact(.origin)) |_| {
+            return .{ .x = .{ .num = 0.0 }, .y = .{ .num = 0.0 }, .z = .{ .num = 0.0 } };
+        }
         _ = self.tryExact(.open_curly) orelse return null;
         const x = try self.expectExpr();
         const y = try self.expectExpr();
@@ -251,7 +293,6 @@ const Parser = struct {
         var token = self.currToken() orelse return null;
         switch (token.tag) {
             .num => {
-                self.curr_token += 1;
                 const n = std.fmt.parseFloat(T, token.span.str()) catch blk: {
                     try self.errors.append(.{
                         .kind = .{ .invalid_number = token.span.str() },
@@ -259,6 +300,7 @@ const Parser = struct {
                     });
                     break :blk default;
                 };
+                self.curr_token += 1;
                 return token.span.sp(T, n);
             },
             else => return null,
@@ -267,6 +309,36 @@ const Parser = struct {
 
     fn expectNum(self: *Parser, comptime expectation: Expectation) Err!Sp([]const u8) {
         return self.expectOf(Sp([]const u8), try self.tryNum(), &.{expectation});
+    }
+
+    fn expectAxis(self: *Parser) Err!Sp(Axis) {
+        return self.tryAxis() orelse {
+            if (self.tryIdent()) |ident| {
+                try self.errors.append(.{
+                    .kind = .{ .not_an_axis = ident.val },
+                    .span = ident.span,
+                });
+                return error.err;
+            } else {
+                return self.expectOf(Sp(Axis), null, &.{.axis});
+            }
+        };
+    }
+    fn tryAxis(self: *Parser) ?Sp(Axis) {
+        var token = self.currToken() orelse return null;
+        switch (token.tag) {
+            .ident => {
+                const axis: Axis = if (token.span.str().len != 1) return null else switch (token.span.str()[0]) {
+                    'x' => .x,
+                    'y' => .y,
+                    'z' => .z,
+                    else => return null,
+                };
+                self.curr_token += 1;
+                return token.span.sp(Axis, axis);
+            },
+            else => return null,
+        }
     }
 };
 
@@ -278,6 +350,7 @@ pub const Expectation = union(enum) {
     ty,
     stmt,
     expr,
+    axis,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
@@ -287,6 +360,7 @@ pub const Expectation = union(enum) {
             .ty => try writer.print("type", .{}),
             .stmt => try writer.print("statement", .{}),
             .expr => try writer.print("expression", .{}),
+            .axis => try writer.print("axis", .{}),
         }
     }
 };
@@ -295,6 +369,7 @@ pub const Expectation = union(enum) {
 pub const ParseErrorKind = union(enum) {
     expected_found: struct { expected: []const Expectation, found: Token },
     invalid_number: []const u8,
+    not_an_axis: []const u8,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
@@ -309,6 +384,7 @@ pub const ParseErrorKind = union(enum) {
                 try writer.print(", found {}\n", .{ef.found});
             },
             .invalid_number => |num| try writer.print("invalid number: {s}", .{num}),
+            .not_an_axis => |axis| try writer.print("`{s}` is not an axis", .{axis}),
         }
     }
 };

@@ -5,12 +5,17 @@ pub const Loc = struct {
     col: usize,
 
     pub fn inSrc(src: []const u8, pos: usize) Loc {
-        var line = 0;
+        var line: usize = 1;
+        var col: usize = 1;
         for (src[0..pos]) |c| {
-            if (c == '\n') line += 1;
-            pos -= 1;
+            if (c == '\n') {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
         }
-        return .{ .line = line, .col = pos };
+        return .{ .line = line, .col = col };
     }
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
@@ -25,7 +30,7 @@ pub const Span = struct {
     src: []const u8,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("{s}:{}", .{ self.file, self.start });
+        try writer.print("{s}:{}", .{ self.file, self.startLoc() });
     }
 
     pub fn str(self: @This()) []const u8 {
@@ -65,7 +70,7 @@ pub const Token = struct {
     tag: Tag,
     span: Span,
 
-    pub const keywords = [_]Tag{ .shape, .layout };
+    pub const keywords = [_]Tag{ .shape, .layout, .origin, .proc };
 
     pub const Tag = enum {
         ident,
@@ -89,6 +94,8 @@ pub const Token = struct {
         // Keywords
         shape,
         layout,
+        origin,
+        proc,
 
         pub fn format(self: Tag, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
             return switch (self) {
@@ -112,6 +119,8 @@ pub const Token = struct {
                 .slash => writer.print("`/`", .{}),
                 .shape => writer.print("`shape`", .{}),
                 .layout => writer.print("`layout`", .{}),
+                .origin => writer.print("`origin`", .{}),
+                .proc => writer.print("`proc`", .{}),
             };
         }
     };
