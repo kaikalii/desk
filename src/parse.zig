@@ -23,31 +23,70 @@ pub const Item = union(enum) {
     field: Field,
     shape: Shape,
     proc: Proc,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .field => try writer.print("{}", .{self.field}),
+            .shape => try writer.print("{}", .{self.shape}),
+            .proc => try writer.print("{}", .{self.proc}),
+        }
+    }
 };
 
 // Shape
 pub const Shape = union(enum) {
     def: ShapeDef,
     alias: ShapeAlias,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .def => try writer.print("{}", .{self.def}),
+            .alias => try writer.print("{}", .{self.alias}),
+        }
+    }
 };
 pub const ShapeDef = struct {
     name: []const u8,
     name_span: Span,
     items: std.ArrayList(Item),
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("shape {s}", .{self.name});
+        try writer.print(" {{\n", .{});
+        for (self.items.items) |item| {
+            try writer.print("    {}\n", .{item});
+        }
+        try writer.print("}}", .{});
+    }
 };
 pub const ShapeAlias = struct {
     name: []const u8,
     name_span: Span,
     ty: Type,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("shape {s} {}", .{ self.name, self.ty });
+    }
 };
 pub const Field = struct {
     name: []const u8,
     ty: Type,
     start: Expr,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{s} {} {}", .{ self.name, self.ty, self.start });
+    }
 };
 pub const Type = union(enum) {
     named: []const u8,
     array: struct { axis: ?Axis, len: Expr, ty: *Type },
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .named => try writer.print("{s}", .{self.named}),
+            .array => try writer.print("[{} {}] {}", .{ self.array.axis orelse .x, self.array.len, self.array.ty }),
+        }
+    }
 };
 
 // Proc
@@ -56,23 +95,58 @@ pub const Proc = struct {
     name_span: Span,
     params: std.ArrayList(Sp([]const u8)),
     body: std.ArrayList(Stmt),
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("proc {s}", .{self.name});
+        for (self.params.items) |param| {
+            try writer.print(" {s}", .{param.val});
+        }
+        try writer.print(" {{\n", .{});
+        for (self.body.items) |stmt| {
+            try writer.print("    {};\n", .{stmt});
+        }
+        try writer.print("}}", .{});
+    }
 };
 
 // Statements
 pub const Stmt = union(enum) {
     call: Call,
     arg: Arg,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .call => try writer.print("{}", .{self.call}),
+            .arg => try writer.print("{}", .{self.arg}),
+        }
+    }
 };
 pub const Call = struct {
     proc: []const u8,
     proc_span: Span,
     args: std.ArrayList(Arg),
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{s}", .{self.proc});
+        for (self.args.items) |arg| {
+            try writer.print(" {}", .{arg});
+        }
+    }
 };
 pub const Arg = union(enum) {
     ident: []const u8,
     num: f64,
     raw_len: []const u8,
     typed_len: []const u8,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .ident => try writer.print("{s}", .{self.ident}),
+            .num => try writer.print("{d}", .{self.num}),
+            .raw_len => try writer.print("@{s}", .{self.raw_len}),
+            .typed_len => try writer.print("#{s}", .{self.typed_len}),
+        }
+    }
 };
 
 // Expressions
@@ -83,12 +157,50 @@ pub const Expr = union(enum) {
     bin: *BinExpr,
     axis: *AxisExpr,
     paren: *Expr,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .ident => try writer.print("{s}", .{self.ident}),
+            .num => try writer.print("{d}", .{self.num}),
+            .vec => try writer.print("{}", .{self.vec}),
+            .bin => try writer.print("{}", .{self.bin}),
+            .axis => try writer.print("{}", .{self.axis}),
+            .paren => try writer.print("({})", .{self.paren}),
+        }
+    }
 };
-pub const VecExpr = struct { x: Expr, y: Expr, z: Expr };
+pub const VecExpr = struct {
+    x: Expr,
+    y: Expr,
+    z: Expr,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{{{}, {}, {}}}", .{ self.x, self.y, self.z });
+    }
+};
 pub const BinOp = enum { add, sub, mul, div };
 pub const BinExpr = struct { op: BinOp, lhs: Expr, rhs: Expr };
-pub const Axis = enum { x, y, z };
-pub const AxisExpr = struct { vec: Expr, axis: Axis };
+pub const Axis = enum {
+    x,
+    y,
+    z,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .x => try writer.print("x", .{}),
+            .y => try writer.print("y", .{}),
+            .z => try writer.print("z", .{}),
+        }
+    }
+};
+pub const AxisExpr = struct {
+    vec: Expr,
+    axis: Axis,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{}:{}", .{ self.vec, self.axis });
+    }
+};
 
 /// Parse tokens into an abstract syntax tree
 pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
