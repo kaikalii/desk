@@ -1,10 +1,10 @@
 shape Person {
     shape Name [30]byte
-    name Name origin
-    age int name:x
+    name Name origin;
+    age int name:x;
 }
 
-people [z 1000]Person origin
+people [1000]Person origin;
 
 proc avg nums res {
     set res 0;

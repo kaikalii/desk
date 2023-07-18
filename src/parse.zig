@@ -51,11 +51,9 @@ pub const ShapeDef = struct {
     items: std.ArrayList(Item),
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("shape {s}", .{self.name});
-        try writer.print(" {{\n", .{});
-        for (self.items.items) |item| {
-            try writer.print("    {}\n", .{item});
-        }
+        try writer.print("shape {s} {{", .{self.name});
+        for (self.items.items) |item|
+            try writer.print("\n    {}", .{item});
         try writer.print("}}", .{});
     }
 };
@@ -72,19 +70,20 @@ pub const Field = struct {
     name: []const u8,
     ty: Type,
     start: Expr,
+    axis: ?Axis,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("{s} {} {}", .{ self.name, self.ty, self.start });
+        try writer.print("{s} {} {} {};", .{ self.name, self.ty, self.start, self.axis orelse .x });
     }
 };
 pub const Type = union(enum) {
     named: []const u8,
-    array: struct { axis: ?Axis, len: Expr, ty: *Type },
+    array: struct { len: Expr, ty: *Type },
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
             .named => try writer.print("{s}", .{self.named}),
-            .array => try writer.print("[{} {}] {}", .{ self.array.axis orelse .x, self.array.len, self.array.ty }),
+            .array => try writer.print("[{}] {}", .{ self.array.len, self.array.ty }),
         }
     }
 };
@@ -98,13 +97,11 @@ pub const Proc = struct {
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("proc {s}", .{self.name});
-        for (self.params.items) |param| {
+        for (self.params.items) |param|
             try writer.print(" {s}", .{param.val});
-        }
         try writer.print(" {{\n", .{});
-        for (self.body.items) |stmt| {
+        for (self.body.items) |stmt|
             try writer.print("    {};\n", .{stmt});
-        }
         try writer.print("}}", .{});
     }
 };
@@ -128,9 +125,8 @@ pub const Call = struct {
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{s}", .{self.proc});
-        for (self.args.items) |arg| {
+        for (self.args.items) |arg|
             try writer.print(" {}", .{arg});
-        }
     }
 };
 pub const Arg = union(enum) {
@@ -175,7 +171,7 @@ pub const VecExpr = struct {
     z: Expr,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("{{{}, {}, {}}}", .{ self.x, self.y, self.z });
+        try writer.print("{{{} {} {}}}", .{ self.x, self.y, self.z });
     }
 };
 pub const BinOp = enum { add, sub, mul, div };
@@ -214,14 +210,10 @@ pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
         .alloc = arena.allocator(),
     };
     // Parse root items
-    var errored = false;
-    while (parser.tryItem() catch blk: {
-        errored = true;
-        break :blk null;
-    }) |item|
+    while (parser.tryItem() catch null) |item|
         parser.root_items.append(item) catch break;
     // Make sure all tokens were consumed
-    if (!errored)
+    if (parser.errors.items.len > 0)
         if (parser.currToken()) |_|
             parser.expected(&.{ .field, .{ .tag = .shape }, .{ .tag = .proc } }) catch {};
     return .{
@@ -252,7 +244,14 @@ const Parser = struct {
         const ident = self.tryIdent() orelse return null;
         const ty = try self.expectType();
         const start = try self.expectExpr();
-        return .{ .name = ident.val, .ty = ty, .start = start };
+        const axis = self.tryAxis();
+        _ = self.expect(.semicolon, &.{.field}) catch {};
+        return .{
+            .name = ident.val,
+            .ty = ty,
+            .start = start,
+            .axis = if (axis) |a| a.val else null,
+        };
     }
 
     fn tryShape(self: *Parser) Err!?Shape {
@@ -290,13 +289,12 @@ const Parser = struct {
         if (self.tryIdent()) |ident|
             return .{ .named = ident.val };
         if (self.tryExact(.open_bracket)) |_| {
-            const axis = if (self.tryAxis()) |axis| axis.val else null;
             const len = try self.expectExpr();
             _ = try self.expect(.close_bracket, &.{});
             const ty = try self.expectType();
             var alloced = try self.alloc.create(Type);
             alloced.* = ty;
-            return .{ .array = .{ .axis = axis, .len = len, .ty = alloced } };
+            return .{ .array = .{ .len = len, .ty = alloced } };
         }
         return null;
     }
@@ -590,9 +588,8 @@ pub const ParseErrorKind = union(enum) {
             .expected_found => |ef| {
                 try writer.print("expected ", .{});
                 for (ef.expected, 0..) |token_ty, i| {
-                    if (i > 0) {
+                    if (i > 0)
                         if (i == ef.expected.len - 1) try writer.print(" or ", .{}) else try writer.print(", ", .{});
-                    }
                     try writer.print("{}", .{token_ty});
                 }
                 try writer.print(", found {}\n", .{ef.found});
