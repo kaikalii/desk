@@ -25,10 +25,19 @@ pub const Item = union(enum) {
 };
 
 // Shape
-pub const Shape = struct {
+pub const Shape = union(enum) {
+    def: ShapeDef,
+    alias: ShapeAlias,
+};
+pub const ShapeDef = struct {
     name: []const u8,
     name_span: Span,
     items: std.ArrayList(Item),
+};
+pub const ShapeAlias = struct {
+    name: []const u8,
+    name_span: Span,
+    ty: Type,
 };
 pub const Field = struct {
     name: []const u8,
@@ -37,7 +46,7 @@ pub const Field = struct {
 };
 pub const Type = union(enum) {
     named: []const u8,
-    array: struct { axis: Axis, len: Expr, ty: *Type },
+    array: struct { axis: ?Axis, len: Expr, ty: *Type },
 };
 
 // Statements
@@ -109,16 +118,27 @@ const Parser = struct {
         // Name
         const name = try self.expectIdent(.name);
         // Items
-        _ = try self.expect(.open_curly, &.{});
-        var items = std.ArrayList(Item).init(self.alloc);
-        while (try self.tryItem()) |item|
-            try items.append(item);
-        _ = try self.expect(.close_curly, &.{ .field, .{ .tag = .shape } });
-        return .{
-            .name = name.val,
-            .name_span = name.span,
-            .items = items,
-        };
+        if (self.tryExact(.open_curly)) |_| {
+            var items = std.ArrayList(Item).init(self.alloc);
+            errdefer items.deinit();
+            while (try self.tryItem()) |item|
+                try items.append(item);
+            _ = try self.expect(.close_curly, &.{ .field, .{ .tag = .shape } });
+            return .{ .def = .{
+                .name = name.val,
+                .name_span = name.span,
+                .items = items,
+            } };
+        } else if (try self.tryType()) |ty| {
+            return .{ .alias = .{
+                .name = name.val,
+                .name_span = name.span,
+                .ty = ty,
+            } };
+        } else {
+            try self.expected(&.{ .{ .tag = .open_curly }, .ty });
+            return error.err;
+        }
     }
 
     fn expectType(self: *Parser) Err!Type {
@@ -128,13 +148,13 @@ const Parser = struct {
         if (self.tryIdent()) |ident|
             return .{ .named = ident.val };
         if (self.tryExact(.open_bracket)) |_| {
-            const axis = try self.expectAxis();
+            const axis = if (self.tryAxis()) |axis| axis.val else null;
             const len = try self.expectExpr();
             _ = try self.expect(.close_bracket, &.{});
             const ty = try self.expectType();
             var alloced = try self.alloc.create(Type);
             alloced.* = ty;
-            return .{ .array = .{ .axis = axis.val, .len = len, .ty = alloced } };
+            return .{ .array = .{ .axis = axis, .len = len, .ty = alloced } };
         }
         return null;
     }
