@@ -102,11 +102,16 @@ pub fn parse(lexed: *const lex.LexedFile, parent_alloc: std.mem.Allocator) Ast {
         .alloc = arena.allocator(),
     };
     // Parse root items
-    while (parser.tryItem() catch null) |item|
+    var errored = false;
+    while (parser.tryItem() catch blk: {
+        errored = true;
+        break :blk null;
+    }) |item|
         parser.root_items.append(item) catch break;
     // Make sure all tokens were consumed
-    if (parser.currToken()) |_|
-        parser.expected(&.{ .field, .{ .tag = .shape } }) catch {};
+    if (!errored)
+        if (parser.currToken()) |_|
+            parser.expected(&.{ .field, .{ .tag = .shape }, .{ .tag = .proc } }) catch {};
     return .{
         .items = parser.root_items,
         .errors = parser.errors,
@@ -197,7 +202,7 @@ const Parser = struct {
         errdefer body.deinit();
         while (try self.tryStmt()) |stmt| {
             try body.append(stmt);
-            _ = self.expect(.semicolon, &.{}) catch {};
+            _ = try self.expect(.semicolon, &.{.arg});
         }
         _ = try self.expect(.close_curly, &.{.stmt});
         return .{
@@ -228,7 +233,14 @@ const Parser = struct {
             return .{ .ident = ident.val };
         if (try self.tryNum(f64, 0.0)) |num|
             return .{ .num = num.val };
-        // TODO: other args
+        if (self.tryExact(.octothorpe)) |_| {
+            const name = try self.expectIdent(.name);
+            return .{ .typed_len = name.val };
+        }
+        if (self.tryExact(.at)) |_| {
+            const name = try self.expectIdent(.name);
+            return .{ .raw_len = name.val };
+        }
         return null;
     }
 

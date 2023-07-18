@@ -74,6 +74,7 @@ pub const Token = struct {
     pub const keywords = [_]Tag{ .shape, .layout, .origin, .proc };
 
     pub const Tag = enum {
+        unknown,
         ident,
         num,
         open_paren,
@@ -87,6 +88,8 @@ pub const Token = struct {
         comma,
         dot,
         equals,
+        octothorpe,
+        at,
         eof,
         plus,
         minus,
@@ -100,6 +103,7 @@ pub const Token = struct {
 
         pub fn format(self: Tag, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
             return switch (self) {
+                .unknown => writer.print("unknown", .{}),
                 .ident => writer.print("identifier", .{}),
                 .num => writer.print("number", .{}),
                 .open_paren => writer.print("`(`", .{}),
@@ -113,6 +117,8 @@ pub const Token = struct {
                 .comma => writer.print("`,`", .{}),
                 .dot => writer.print("`.`", .{}),
                 .equals => writer.print("`=`", .{}),
+                .octothorpe => writer.print("`#`", .{}),
+                .at => writer.print("`@`", .{}),
                 .eof => writer.print("end of file", .{}),
                 .plus => writer.print("`+`", .{}),
                 .minus => writer.print("`-`", .{}),
@@ -128,6 +134,7 @@ pub const Token = struct {
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self.tag) {
+            .unknown => try writer.print("`{s}`", .{self.span.str()}),
             .ident => try writer.print("`{s}`", .{self.span.str()}),
             .num => try writer.print("`{s}`", .{self.span.str()}),
             else => try writer.print("{}", .{self.tag}),
@@ -231,6 +238,8 @@ const Lexer = struct {
                 ',' => try self.addToken(start, .comma),
                 '.' => try self.addToken(start, .dot),
                 '=' => try self.addToken(start, .equals),
+                '#' => try self.addToken(start, .octothorpe),
+                '@' => try self.addToken(start, .at),
                 '+' => try self.addToken(start, .plus),
                 '-' => try self.addToken(start, .minus),
                 '*' => try self.addToken(start, .star),
@@ -261,6 +270,8 @@ const Lexer = struct {
                             while (self.nextIf(isDigit)) |_| {}
                         }
                         try self.addToken(start, .num);
+                    } else {
+                        try self.addToken(start, .unknown);
                     }
                 },
             }
