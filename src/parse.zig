@@ -51,9 +51,9 @@ pub const ShapeDef = struct {
     items: std.ArrayList(Item),
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("shape {s} {{", .{self.name});
+        try writer.print("shape {s} {{\n", .{self.name});
         for (self.items.items) |item|
-            try writer.print("\n    {}", .{item});
+            try writer.print("    {}\n", .{item});
         try writer.print("}}", .{});
     }
 };
@@ -78,7 +78,7 @@ pub const Field = struct {
 };
 pub const Type = union(enum) {
     named: []const u8,
-    array: struct { len: Expr, ty: *Type },
+    array: struct { len: ?Expr, ty: *Type },
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const lex = @import("lex.zig");
 const parse = @import("parse.zig");
+const compile = @import("compile.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -25,4 +26,6 @@ pub fn main() !void {
         for (ast.errors.items) |err|
             std.debug.print("{}\n", .{err});
     }
+
+    _ = compile.compile(ast);
 }
