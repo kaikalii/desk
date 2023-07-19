@@ -3,14 +3,29 @@ const parse = @import("parse.zig");
 const lex = @import("lex.zig");
 const Axis = parse.Axis;
 const Span = lex.Span;
+const Sp = lex.Sp;
 
 const Vec = packed struct(u63) {
     x: u21,
     y: u21,
     z: u21,
-    pub const zero: @This() = .{ .x = 0, .y = 0, .z = 0 };
-    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+    pub const zero: Vec = .{ .x = 0, .y = 0, .z = 0 };
+    pub fn format(self: Vec, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{{{} {} {}}}", .{ self.x, self.y, self.z });
+    }
+    pub fn max(self: Vec, other: Vec) Vec {
+        return .{
+            .x = @max(self.x, other.x),
+            .y = @max(self.y, other.y),
+            .z = @max(self.z, other.z),
+        };
+    }
+    pub fn add(self: Vec, other: Vec) Vec {
+        return .{
+            .x = self.x + other.x,
+            .y = self.y + other.y,
+            .z = self.z + other.z,
+        };
     }
 };
 const FVec = struct {
@@ -92,6 +107,32 @@ const Type = union(enum) {
             .err => try writer.print("<error>", .{}),
         }
     }
+
+    pub fn size(self: @This(), axis: Axis) Vec {
+        const scalar = switch (self) {
+            .byte => 1,
+            .int => 4,
+            .real => 8,
+            .array => |arr| blk: {
+                const subsize = arr.type.size(axis);
+                break :blk 8 + arr.len * switch (axis) {
+                    .x => subsize.x,
+                    .y => subsize.y,
+                    .z => subsize.z,
+                };
+            },
+            .slice => 16,
+            .shape => |sh| return sh.size,
+            .err => 0,
+        };
+        var res = Vec{ .x = 1, .y = 1, .z = 1 };
+        switch (axis) {
+            .x => res.x = @intCast(scalar),
+            .y => res.y = @intCast(scalar),
+            .z => res.z = @intCast(scalar),
+        }
+        return res;
+    }
 };
 
 pub const Compiled = struct {
@@ -139,8 +180,17 @@ const Compiler = struct {
         switch (pshape) {
             .def => |def| {
                 var sh = Shape.init(self.alloc);
+                // Compile items
                 for (def.items.items) |it|
                     try self.item(&sh, it);
+                // Determine size
+                var fieldIter = sh.fields.iterator();
+                while (fieldIter.next()) |entry| {
+                    const fld = entry.value_ptr;
+                    const end = fld.start.add(fld.type.size(fld.axis));
+                    sh.size = sh.size.max(end);
+                }
+                // Insert shape
                 try parent.shapes.put(def.name, sh);
             },
             .alias => |alias| {
@@ -274,6 +324,18 @@ const Compiler = struct {
             .raw_len => |ident| {
                 _ = ident;
                 @panic("TODO: raw_len");
+            },
+            .end => |ident| {
+                if (self.getField(parent, ident.val)) |fld| {
+                    const size = fld.type.size(fld.axis);
+                    return .{ .vec = .{
+                        .x = @floatFromInt(fld.start.x + size.x),
+                        .y = @floatFromInt(fld.start.y + size.y),
+                        .z = @floatFromInt(fld.start.z + size.z),
+                    } };
+                }
+                try self.errors.append(.{ .kind = .{ .unknown_ident = ident.val }, .span = ident.span });
+                return .err;
             },
             .paren => |child| return self.expr(parent, child.*),
             .bin => |bin| {

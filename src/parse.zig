@@ -133,6 +133,7 @@ pub const Expr = union(enum) {
     ident: Sp([]const u8),
     raw_len: Sp([]const u8),
     typed_len: Sp([]const u8),
+    end: Sp([]const u8),
     num: Sp(f64),
     vec: *VecExpr,
     bin: *BinExpr,
@@ -141,9 +142,10 @@ pub const Expr = union(enum) {
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
-            .ident => try writer.print("{s}", .{self.ident.val}),
-            .raw_len => try writer.print("@{s}", .{self.raw_len.val}),
-            .typed_len => try writer.print("#{s}", .{self.typed_len.val}),
+            .ident => |name| try writer.print("{s}", .{name.val}),
+            .raw_len => |name| try writer.print("@{s}", .{name.val}),
+            .typed_len => |name| try writer.print("#{s}", .{name.val}),
+            .end => |name| try writer.print("!{s}", .{name.val}),
             .num => try writer.print("{d}", .{self.num}),
             .vec => try writer.print("{}", .{self.vec}),
             .bin => try writer.print("{}", .{self.bin}),
@@ -155,8 +157,9 @@ pub const Expr = union(enum) {
     pub fn span(self: @This()) Span {
         return switch (self) {
             .ident => |ident| ident.span,
-            .raw_len => |raw_len| raw_len.span,
-            .typed_len => |typed_len| typed_len.span,
+            .raw_len => |name| name.span,
+            .typed_len => |name| name.span,
+            .end => |name| name.span,
             .num => |num| num.span,
             .vec => |vec| vec.x.span().merge(vec.z.span()),
             .bin => |bin| bin.lhs.span().merge(bin.rhs.span()),
@@ -398,6 +401,10 @@ const Parser = struct {
             const alloced = try self.alloc.create(VecExpr);
             alloced.* = vec;
             return .{ .vec = alloced };
+        }
+        if (self.tryExact(.bang)) |_| {
+            const name = try self.expectIdent(.name);
+            return .{ .end = name };
         }
         if (self.tryExact(.octothorpe)) |_| {
             const name = try self.expectIdent(.name);
