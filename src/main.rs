@@ -1,4 +1,5 @@
 mod lex;
+mod parse;
 
 fn main() {
     let path = "examples/test.desk";

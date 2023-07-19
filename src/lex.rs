@@ -55,7 +55,7 @@ pub enum Keyword {
     Fn,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Token<'i> {
     Ident(&'i str),
     Number(&'i str),
@@ -70,6 +70,7 @@ pub enum Token<'i> {
     Period,
     Colon,
     Semicolon,
+    Bang,
     Octothorpe,
     At,
     Equals,
@@ -77,6 +78,34 @@ pub enum Token<'i> {
     Minus,
     Star,
     Slash,
+}
+
+impl<'i> fmt::Debug for Token<'i> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::Ident(ident) => write!(f, "`{ident}"),
+            Token::Number(number) => write!(f, "{number}"),
+            Token::Keyword(keyword) => write!(f, "`{:?}`", keyword),
+            Token::OpenParen => write!(f, "`(`"),
+            Token::CloseParen => write!(f, "`)`"),
+            Token::OpenBracket => write!(f, "`[`"),
+            Token::CloseBracket => write!(f, "`]`"),
+            Token::OpenCurly => write!(f, "`{{`"),
+            Token::CloseCurly => write!(f, "`}}`"),
+            Token::Comma => write!(f, "`,`"),
+            Token::Period => write!(f, "`.`"),
+            Token::Colon => write!(f, "`:`"),
+            Token::Semicolon => write!(f, "`;`"),
+            Token::Bang => write!(f, "`!`"),
+            Token::Octothorpe => write!(f, "`#`"),
+            Token::At => write!(f, "`@`"),
+            Token::Equals => write!(f, "`=`"),
+            Token::Plus => write!(f, "`+`"),
+            Token::Minus => write!(f, "`-`"),
+            Token::Star => write!(f, "`*`"),
+            Token::Slash => write!(f, "`/`"),
+        }
+    }
 }
 
 pub fn lex<'i>(file: &'i str, input: &'i str) -> Result<Vec<Sp<'i, Token<'i>>>, char> {
@@ -138,11 +167,11 @@ impl<'i> Lexer<'i> {
                 '.' => self.add_token(start, Token::Period),
                 ':' => self.add_token(start, Token::Colon),
                 ';' => self.add_token(start, Token::Semicolon),
+                '!' => self.add_token(start, Token::Bang),
                 '#' => self.add_token(start, Token::Octothorpe),
                 '@' => self.add_token(start, Token::At),
                 '=' => self.add_token(start, Token::Equals),
                 '+' => self.add_token(start, Token::Plus),
-                '-' => self.add_token(start, Token::Minus),
                 '*' => self.add_token(start, Token::Star),
                 '/' => self.add_token(start, Token::Slash),
                 c if is_ident_head(c) => {
@@ -156,10 +185,17 @@ impl<'i> Lexer<'i> {
                     };
                     self.add_token(start, token);
                 }
-                c if c.is_ascii_digit() => {
+                c if c.is_ascii_digit() || c == '-' => {
+                    let mut got_number = c.is_ascii_digit();
                     // Numbers
                     // Whole part
-                    while self.next_char_if(|c| c.is_ascii_digit()).is_some() {}
+                    while self.next_char_if(|c| c.is_ascii_digit()).is_some() {
+                        got_number = true;
+                    }
+                    if !got_number {
+                        self.add_token(start, Token::Minus);
+                        continue;
+                    }
                     // Fractional part
                     if self.next_char_exact('.') {
                         while self.next_char_if(|c| c.is_ascii_digit()).is_some() {}
