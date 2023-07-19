@@ -27,7 +27,7 @@ pub fn main() !void {
             std.debug.print("{}\n", .{err});
     }
 
-    const compiled = compile.compile(ast, alloc);
+    const compiled = try compile.compile(ast, alloc);
     defer compiled.deinit();
 
     std.debug.print("\n{\n}\n\n", .{compiled.root});

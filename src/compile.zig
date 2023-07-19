@@ -150,20 +150,21 @@ pub const Compiled = struct {
 };
 
 /// Compile an AST into a shape tree.
-pub fn compile(ast: parse.Ast, parent_alloc: std.mem.Allocator) Compiled {
+pub fn compile(ast: parse.Ast, parent_alloc: std.mem.Allocator) Err!Compiled {
     var arena = std.heap.ArenaAllocator.init(parent_alloc);
+    errdefer arena.deinit();
     const alloc = arena.allocator();
     var root = Shape.init(alloc);
-    root.aliases.put("byte", .byte) catch {};
-    root.aliases.put("int", .int) catch {};
-    root.aliases.put("real", .real) catch {};
+    try root.aliases.put("byte", .byte);
+    try root.aliases.put("int", .int);
+    try root.aliases.put("real", .real);
     var compiler = Compiler{
         .ast = ast,
         .root = root,
         .errors = std.ArrayList(CompileError).init(alloc),
         .alloc = arena.allocator(),
     };
-    compiler.items(&compiler.root, ast.items.items) catch {};
+    try compiler.items(&compiler.root, ast.items.items);
     return .{
         .root = compiler.root,
         .errors = compiler.errors,
@@ -171,7 +172,7 @@ pub fn compile(ast: parse.Ast, parent_alloc: std.mem.Allocator) Compiled {
     };
 }
 
-const Err = error{err} || std.mem.Allocator.Error;
+const Err = std.mem.Allocator.Error;
 
 const Compiler = struct {
     ast: parse.Ast,
