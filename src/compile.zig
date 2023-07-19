@@ -30,22 +30,35 @@ const Type = union(enum) {
     real,
     array: struct { len: u64, type: *Type },
     slice: struct { type: *Type },
-    shape: *Shape,
+    shape: Shape,
+    err,
 };
 
 pub const Compiled = struct {
     root: Shape,
+    errors: std.ArrayList(CompileError),
+    arena: std.heap.ArenaAllocator,
+
+    pub fn deinit(self: *const Compiled) void {
+        self.arena.deinit();
+    }
 };
 
+/// Compile an AST into a shape tree.
 pub fn compile(ast: parse.Ast) Compiled {
     var the_ast = ast;
     var compiler = Compiler{
         .ast = the_ast,
         .root = Shape.init(the_ast.arena.allocator()),
+        .errors = std.ArrayList(CompileError).init(the_ast.arena.allocator()),
     };
     for (the_ast.items.items) |it|
         compiler.item(&compiler.root, it) catch {};
-    return .{ .root = compiler.root };
+    return .{
+        .root = compiler.root,
+        .errors = compiler.errors,
+        .arena = the_ast.arena,
+    };
 }
 
 const Err = error{err} || std.mem.Allocator.Error;
@@ -53,6 +66,7 @@ const Err = error{err} || std.mem.Allocator.Error;
 const Compiler = struct {
     ast: parse.Ast,
     root: Shape,
+    errors: std.ArrayList(CompileError),
 
     fn alloc(self: *Compiler) std.mem.Allocator {
         return self.ast.arena.allocator();
@@ -67,7 +81,7 @@ const Compiler = struct {
                 try parent.shapes.put(def.name, sh);
             },
             .alias => |alias| {
-                var t = self.ty(alias.ty);
+                var t = try self.ty(parent, alias.ty);
                 try parent.aliases.put(alias.name, t);
             },
         }
@@ -87,7 +101,7 @@ const Compiler = struct {
         _ = self;
     }
 
-    fn ty(self: *Compiler, parent: *const Shape, t: parse.Type) Type {
+    fn ty(self: *Compiler, parent: *const Shape, t: parse.Type) Err!Type {
         switch (t) {
             .named => |name| {
                 if (std.mem.eql(u8, name, "byte"))
@@ -96,9 +110,15 @@ const Compiler = struct {
                     return .int;
                 if (std.mem.eql(u8, name, "real"))
                     return .real;
+                if (parent.aliases.get(name)) |alias|
+                    return alias;
+                if (parent.shapes.get(name)) |sh|
+                    return .{ .shape = sh };
+                try self.errors.append(.{ .unknown_type = name });
+                return .err;
             },
             .array => |arr| {
-                const subty = self.ty(parent, arr.ty.*);
+                const subty = try self.ty(parent, arr.ty.*);
                 var alloced = try self.alloc().create(Type);
                 errdefer self.alloc().destroy(Type, alloced);
                 alloced.* = subty;
@@ -114,7 +134,7 @@ const Compiler = struct {
 
     fn field(self: *Compiler, parent: *Shape, fld: parse.Field) Err!void {
         var f = Field{
-            .type = self.ty(parent, fld.ty),
+            .type = try self.ty(parent, fld.ty),
             .start = Vec{ .x = 0, .y = 0, .z = 0 },
             .axis = fld.axis orelse .x,
         };
@@ -124,6 +144,16 @@ const Compiler = struct {
     fn expr(self: *const Compiler, ex: parse.Expr) u64 {
         _ = ex;
         _ = self;
-        unreachable;
+        return 0;
+    }
+};
+
+pub const CompileError = union(enum) {
+    unknown_type: []const u8,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .unknown_type => |name| try writer.print("unknown type: {}", .{name}),
+        }
     }
 };

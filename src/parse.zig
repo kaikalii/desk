@@ -83,7 +83,7 @@ pub const Type = union(enum) {
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
             .named => try writer.print("{s}", .{self.named}),
-            .array => try writer.print("[{}] {}", .{ self.array.len, self.array.ty }),
+            .array => |array| if (array.len) |len| try writer.print("[{}]{}", .{ len, array.ty }) else try writer.print("[]{}", .{array.ty}),
         }
     }
 };
@@ -109,19 +109,17 @@ pub const Proc = struct {
 // Statements
 pub const Stmt = union(enum) {
     call: Call,
-    arg: Arg,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
             .call => try writer.print("{}", .{self.call}),
-            .arg => try writer.print("{}", .{self.arg}),
         }
     }
 };
 pub const Call = struct {
     proc: []const u8,
     proc_span: Span,
-    args: std.ArrayList(Arg),
+    args: std.ArrayList(Expr),
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{s}", .{self.proc});
@@ -129,25 +127,12 @@ pub const Call = struct {
             try writer.print(" {}", .{arg});
     }
 };
-pub const Arg = union(enum) {
-    ident: []const u8,
-    num: f64,
-    raw_len: []const u8,
-    typed_len: []const u8,
-
-    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        switch (self) {
-            .ident => try writer.print("{s}", .{self.ident}),
-            .num => try writer.print("{d}", .{self.num}),
-            .raw_len => try writer.print("@{s}", .{self.raw_len}),
-            .typed_len => try writer.print("#{s}", .{self.typed_len}),
-        }
-    }
-};
 
 // Expressions
 pub const Expr = union(enum) {
     ident: []const u8,
+    raw_len: []const u8,
+    typed_len: []const u8,
     num: f64,
     vec: *VecExpr,
     bin: *BinExpr,
@@ -157,6 +142,8 @@ pub const Expr = union(enum) {
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
             .ident => try writer.print("{s}", .{self.ident}),
+            .raw_len => try writer.print("@{s}", .{self.raw_len}),
+            .typed_len => try writer.print("#{s}", .{self.typed_len}),
             .num => try writer.print("{d}", .{self.num}),
             .vec => try writer.print("{}", .{self.vec}),
             .bin => try writer.print("{}", .{self.bin}),
@@ -331,27 +318,11 @@ const Parser = struct {
 
     fn tryCall(self: *Parser) Err!?Call {
         const proc = self.tryIdent() orelse return null;
-        var args = std.ArrayList(Arg).init(self.alloc);
+        var args = std.ArrayList(Expr).init(self.alloc);
         errdefer args.deinit();
-        while (try self.tryArg()) |arg|
+        while (try self.tryExpr()) |arg|
             try args.append(arg);
         return .{ .proc = proc.val, .proc_span = proc.span, .args = args };
-    }
-
-    fn tryArg(self: *Parser) Err!?Arg {
-        if (self.tryIdent()) |ident|
-            return .{ .ident = ident.val };
-        if (try self.tryNum(f64, 0.0)) |num|
-            return .{ .num = num.val };
-        if (self.tryExact(.octothorpe)) |_| {
-            const name = try self.expectIdent(.name);
-            return .{ .typed_len = name.val };
-        }
-        if (self.tryExact(.at)) |_| {
-            const name = try self.expectIdent(.name);
-            return .{ .raw_len = name.val };
-        }
-        return null;
     }
 
     fn expectExpr(self: *Parser) Err!Expr {
@@ -414,6 +385,14 @@ const Parser = struct {
             const alloced = try self.alloc.create(VecExpr);
             alloced.* = vec;
             return .{ .vec = alloced };
+        }
+        if (self.tryExact(.octothorpe)) |_| {
+            const name = try self.expectIdent(.name);
+            return .{ .typed_len = name.val };
+        }
+        if (self.tryExact(.at)) |_| {
+            const name = try self.expectIdent(.name);
+            return .{ .raw_len = name.val };
         }
         if (self.tryExact(.open_paren)) |_| {
             const expr = try self.expectExpr();

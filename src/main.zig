@@ -17,7 +17,6 @@ pub fn main() !void {
 
     // Parse
     const ast = parse.parse(&lexed, alloc);
-    defer ast.deinit();
 
     if (ast.errors.items.len == 0) {
         for (ast.items.items) |item|
@@ -27,5 +26,6 @@ pub fn main() !void {
             std.debug.print("{}\n", .{err});
     }
 
-    _ = compile.compile(ast);
+    const compiled = compile.compile(ast);
+    defer compiled.deinit();
 }
