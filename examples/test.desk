@@ -9,5 +9,7 @@ people [1000]Person origin;
 proc avg nums res {
     set res 0;
     fold add nums res;
-    div res #nums res;
+    set len 0;
+    len nums len;
+    div res len res;
 }

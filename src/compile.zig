@@ -42,14 +42,20 @@ const Shape = struct {
     shapes: std.StringHashMap(Shape),
     fields: std.StringHashMap(Field),
     aliases: std.StringHashMap(Type),
+    procs: std.StringHashMap(Proc),
+    params: std.ArrayList([]const u8),
     size: Vec,
+    scoped_parent: ?*Shape,
 
     fn init(alloc: std.mem.Allocator) Shape {
         return .{
             .shapes = std.StringHashMap(Shape).init(alloc),
             .fields = std.StringHashMap(Field).init(alloc),
             .aliases = std.StringHashMap(Type).init(alloc),
+            .procs = std.StringHashMap(Proc).init(alloc),
+            .params = std.ArrayList([]const u8).init(alloc),
             .size = Vec.zero,
+            .scoped_parent = null,
         };
     }
 
@@ -139,6 +145,18 @@ const Type = union(enum) {
     }
 };
 
+const Proc = struct {
+    name: []const u8,
+    params: std.ArrayList([]const u8),
+    regs: std.ArrayList([]const u8),
+    calls: std.ArrayList(Call),
+};
+
+const Call = struct {
+    proc: []const u8,
+    args: std.ArrayList(Value),
+};
+
 pub const Compiled = struct {
     root: Shape,
     errors: std.ArrayList(CompileError),
@@ -215,10 +233,33 @@ const Compiler = struct {
         };
     }
 
-    fn proc(self: *Compiler, parent: *Shape, pr: parse.Proc) void {
-        _ = pr;
-        _ = parent;
-        _ = self;
+    fn proc(self: *Compiler, parent: *Shape, pr: parse.Proc) Err!void {
+        var scope = Shape.init(self.alloc);
+        scope.scoped_parent = parent;
+        // Params
+        for (pr.params.items) |param| {
+            try scope.params.append(param.val);
+        }
+        // Calls
+        var regs = std.ArrayList([]const u8).init(self.alloc);
+        var calls = std.ArrayList(Call).init(self.alloc);
+        for (pr.body.items) |stmt| {
+            switch (stmt) {
+                .call => |call| {
+                    var args = std.ArrayList(Value).init(self.alloc);
+                    for (call.args.items) |arg| {
+                        try args.append(try self.expr(&scope, arg));
+                    }
+                    try calls.append(.{ .proc = call.proc, .args = args });
+                },
+            }
+        }
+        try parent.procs.put(pr.name, .{
+            .name = pr.name,
+            .regs = regs,
+            .params = scope.params,
+            .calls = calls,
+        });
     }
 
     fn ty(self: *Compiler, parent: *const Shape, t: parse.Type) Err!Type {
@@ -263,7 +304,7 @@ const Compiler = struct {
             return fld;
         if (self.root.fields.get(name)) |fld|
             return fld;
-        return null;
+        return if (parent.scoped_parent) |p| self.getField(p, name) else null;
     }
 
     fn getType(self: *const Compiler, parent: *const Shape, name: []const u8) ?Type {
@@ -275,7 +316,7 @@ const Compiler = struct {
             return .{ .shape = sh };
         if (self.root.shapes.getPtr(name)) |sh|
             return .{ .shape = sh };
-        return null;
+        return if (parent.scoped_parent) |p| self.getType(p, name) else null;
     }
 
     fn valueAsNum(self: *Compiler, val: Value, span: Span) Err!f64 {
@@ -285,7 +326,7 @@ const Compiler = struct {
                 try self.errors.append(.{ .kind = .{ .expected_num = val }, .span = span });
                 return 0.0;
             },
-            .err => return 0.0,
+            .arg, .err => return 0.0,
         }
     }
 
@@ -300,7 +341,7 @@ const Compiler = struct {
                 .y = @intFromFloat(v.y),
                 .z = @intFromFloat(v.z),
             },
-            .err => return Vec.zero,
+            .arg, .err => return Vec.zero,
         }
     }
 
@@ -318,6 +359,9 @@ const Compiler = struct {
                 return .{ .vec = .{ .x = x, .y = y, .z = z } };
             },
             .ident => |ident| {
+                for (parent.params.items) |param|
+                    if (std.mem.eql(u8, param, ident.val))
+                        return .{ .reg = param };
                 if (self.getField(parent, ident.val)) |fld|
                     return .{ .vec = .{
                         .x = @floatFromInt(fld.start.x),
@@ -387,6 +431,7 @@ const Compiler = struct {
 pub const Value = union(enum) {
     num: f64,
     vec: FVec,
+    reg,
     err,
 
     fn binOp(self: Value, other: Value, comptime f: fn (f64, f64) f64) Value {
