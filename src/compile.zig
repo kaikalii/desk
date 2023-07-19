@@ -85,6 +85,10 @@ const Field = struct {
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{} {} {}", .{ self.type, self.start, self.axis });
     }
+
+    pub fn size(self: Field) Vec {
+        return self.type.size(self.axis);
+    }
 };
 
 const Type = union(enum) {
@@ -159,8 +163,7 @@ pub fn compile(ast: parse.Ast, parent_alloc: std.mem.Allocator) Compiled {
         .errors = std.ArrayList(CompileError).init(alloc),
         .alloc = arena.allocator(),
     };
-    for (ast.items.items) |it|
-        compiler.item(&compiler.root, it) catch {};
+    compiler.items(&compiler.root, ast.items.items) catch {};
     return .{
         .root = compiler.root,
         .errors = compiler.errors,
@@ -181,8 +184,7 @@ const Compiler = struct {
             .def => |def| {
                 var sh = Shape.init(self.alloc);
                 // Compile items
-                for (def.items.items) |it|
-                    try self.item(&sh, it);
+                try self.items(&sh, def.items.items);
                 // Determine size
                 var fieldIter = sh.fields.iterator();
                 while (fieldIter.next()) |entry| {
@@ -198,6 +200,10 @@ const Compiler = struct {
                 try parent.aliases.put(alias.name, t);
             },
         }
+    }
+    fn items(self: *Compiler, parent: *Shape, its: []const parse.Item) Err!void {
+        for (its) |it|
+            try self.item(parent, it);
     }
 
     fn item(self: *Compiler, parent: *Shape, it: parse.Item) Err!void {
@@ -239,7 +245,16 @@ const Compiler = struct {
             .start = try self.valueAsVec(try self.expr(parent, fld.start), fld.start.span()),
             .axis = fld.axis orelse .x,
         };
-        try parent.fields.put(fld.name, f);
+        var parentIter = parent.fields.iterator();
+        while (parentIter.next()) |entry| {
+            const other = entry.value_ptr.*;
+            if (rects_intersect(f.start, f.size(), other.start, other.size()))
+                try self.errors.append(.{
+                    .kind = .{ .fields_overlap = .{ .name = fld.name.val, .other = entry.key_ptr.* } },
+                    .span = fld.name.span,
+                });
+        }
+        try parent.fields.put(fld.name.val, f);
     }
 
     fn getField(self: *const Compiler, parent: *const Shape, name: []const u8) ?Field {
@@ -302,14 +317,14 @@ const Compiler = struct {
                 return .{ .vec = .{ .x = x, .y = y, .z = z } };
             },
             .ident => |ident| {
-                if (std.mem.eql(u8, ident.val, "origin"))
-                    return .{ .vec = FVec.zero };
                 if (self.getField(parent, ident.val)) |fld|
                     return .{ .vec = .{
                         .x = @floatFromInt(fld.start.x),
                         .y = @floatFromInt(fld.start.y),
                         .z = @floatFromInt(fld.start.z),
                     } };
+                if (std.mem.eql(u8, ident.val, "origin"))
+                    return .{ .vec = FVec.zero };
                 try self.errors.append(.{ .kind = .{ .unknown_ident = ident.val }, .span = ident.span });
                 return .err;
             },
@@ -416,6 +431,10 @@ pub const CompileErrorKind = union(enum) {
     unknown_ident: []const u8,
     expected_num: Value,
     expected_vec: Value,
+    fields_overlap: struct {
+        name: []const u8,
+        other: []const u8,
+    },
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
@@ -423,6 +442,7 @@ pub const CompileErrorKind = union(enum) {
             .unknown_ident => |name| try writer.print("unknown ident: {s}", .{name}),
             .expected_num => |val| try writer.print("expected number, got {}", .{val}),
             .expected_vec => |val| try writer.print("expected vector, got {}", .{val}),
+            .fields_overlap => |overlap| try writer.print("field {s} overlaps {s}", .{ overlap.name, overlap.other }),
         }
     }
 };
@@ -435,3 +455,15 @@ pub const CompileError = struct {
         try writer.print("{}: {}", .{ self.span, self.kind });
     }
 };
+
+fn rects_intersect(a_start: Vec, a_size: Vec, b_start: Vec, b_size: Vec) bool {
+    const a_end = a_start.add(a_size);
+    const b_end = b_start.add(b_size);
+    if (a_start.x >= b_end.x or b_start.x >= a_end.x)
+        return false;
+    if (a_start.y >= b_end.y or b_start.y >= a_end.y)
+        return false;
+    if (a_start.z >= b_end.z or b_start.z >= a_end.z)
+        return false;
+    return true;
+}

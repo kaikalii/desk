@@ -67,13 +67,13 @@ pub const ShapeAlias = struct {
     }
 };
 pub const Field = struct {
-    name: []const u8,
+    name: Sp([]const u8),
     ty: Type,
     start: Expr,
     axis: ?Axis,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-        try writer.print("{s} {} {} {};", .{ self.name, self.ty, self.start, self.axis orelse .x });
+        try writer.print("{s} {} {} {};", .{ self.name.val, self.ty, self.start, self.axis orelse .x });
     }
 };
 pub const Type = union(enum) {
@@ -250,7 +250,7 @@ const Parser = struct {
         const axis = self.tryAxis();
         _ = self.expect(.semicolon, &.{.field}) catch {};
         return .{
-            .name = ident.val,
+            .name = ident,
             .ty = ty,
             .start = start,
             .axis = if (axis) |a| a.val else null,
