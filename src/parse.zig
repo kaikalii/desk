@@ -405,9 +405,6 @@ const Parser = struct {
     }
 
     fn tryVec(self: *Parser) Err!?VecExpr {
-        if (self.tryExact(.origin)) |_| {
-            return .{ .x = .{ .num = 0.0 }, .y = .{ .num = 0.0 }, .z = .{ .num = 0.0 } };
-        }
         _ = self.tryExact(.open_curly) orelse return null;
         const x = try self.expectExpr();
         const y = try self.expectExpr();

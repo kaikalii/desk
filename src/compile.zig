@@ -2,8 +2,22 @@ const std = @import("std");
 const parse = @import("parse.zig");
 const Axis = parse.Axis;
 
-const Vec = packed struct(u63) { x: u21, y: u21, z: u21 };
-const FVec = struct { x: f64, y: f64, z: f64 };
+const Vec = packed struct(u63) {
+    x: u21,
+    y: u21,
+    z: u21,
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{{{} {} {}}}", .{ self.x, self.y, self.z });
+    }
+};
+const FVec = struct {
+    x: f64,
+    y: f64,
+    z: f64,
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{{{} {} {}}}", .{ self.x, self.y, self.z });
+    }
+};
 
 const Shape = struct {
     shapes: std.StringHashMap(Shape),
@@ -17,12 +31,39 @@ const Shape = struct {
             .aliases = std.StringHashMap(Type).init(alloc),
         };
     }
+
+    pub fn format(self: @This(), comptime s: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("(shape {s}(shapes", .{s});
+
+        var shapeIter = self.shapes.iterator();
+        while (shapeIter.next()) |entry| {
+            try writer.print("{s} {s}: {},", .{ s, entry.key_ptr.*, entry.value_ptr.* });
+        }
+
+        try writer.print("{s}) {s}(aliases", .{ s, s });
+        var typeIter = self.aliases.iterator();
+        while (typeIter.next()) |entry| {
+            try writer.print("{s} {s}: {},", .{ s, entry.key_ptr.*, entry.value_ptr.* });
+        }
+
+        try writer.print("{s}) {s}(fields", .{ s, s });
+        var fieldIter = self.fields.iterator();
+        while (fieldIter.next()) |entry| {
+            try writer.print("{s} {s}: {},", .{ s, entry.key_ptr.*, entry.value_ptr.* });
+        }
+
+        try writer.print("{s}))", .{s});
+    }
 };
 
 const Field = struct {
     type: Type,
     start: Vec,
     axis: Axis,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{} {} {}", .{ self.type, self.start, self.axis });
+    }
 };
 
 const Type = union(enum) {
@@ -31,8 +72,20 @@ const Type = union(enum) {
     real,
     array: struct { len: u64, type: *Type },
     slice: struct { type: *Type },
-    shape: Shape,
+    shape: *Shape,
     err,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        switch (self) {
+            .byte => try writer.print("byte", .{}),
+            .int => try writer.print("int", .{}),
+            .real => try writer.print("real", .{}),
+            .array => |arr| try writer.print("[{}]{}", .{ arr.len, arr.type.* }),
+            .slice => |slice| try writer.print("[]{}", .{slice.type.*}),
+            .shape => |sh| try writer.print("{}", .{sh}),
+            .err => try writer.print("<error>", .{}),
+        }
+    }
 };
 
 pub const Compiled = struct {
@@ -46,19 +99,25 @@ pub const Compiled = struct {
 };
 
 /// Compile an AST into a shape tree.
-pub fn compile(ast: parse.Ast) Compiled {
-    var the_ast = ast;
+pub fn compile(ast: parse.Ast, parent_alloc: std.mem.Allocator) Compiled {
+    var arena = std.heap.ArenaAllocator.init(parent_alloc);
+    const alloc = arena.allocator();
+    var root = Shape.init(alloc);
+    root.aliases.put("byte", .byte) catch {};
+    root.aliases.put("int", .int) catch {};
+    root.aliases.put("real", .real) catch {};
     var compiler = Compiler{
-        .ast = the_ast,
-        .root = Shape.init(the_ast.arena.allocator()),
-        .errors = std.ArrayList(CompileError).init(the_ast.arena.allocator()),
+        .ast = ast,
+        .root = root,
+        .errors = std.ArrayList(CompileError).init(alloc),
+        .alloc = arena.allocator(),
     };
-    for (the_ast.items.items) |it|
+    for (ast.items.items) |it|
         compiler.item(&compiler.root, it) catch {};
     return .{
         .root = compiler.root,
         .errors = compiler.errors,
-        .arena = the_ast.arena,
+        .arena = arena,
     };
 }
 
@@ -68,15 +127,12 @@ const Compiler = struct {
     ast: parse.Ast,
     root: Shape,
     errors: std.ArrayList(CompileError),
-
-    fn alloc(self: *Compiler) std.mem.Allocator {
-        return self.ast.arena.allocator();
-    }
+    alloc: std.mem.Allocator,
 
     fn shape(self: *Compiler, parent: *Shape, pshape: parse.Shape) Err!void {
         switch (pshape) {
             .def => |def| {
-                var sh = Shape.init(self.alloc());
+                var sh = Shape.init(self.alloc);
                 for (def.items.items) |it|
                     try self.item(&sh, it);
                 try parent.shapes.put(def.name, sh);
@@ -105,27 +161,15 @@ const Compiler = struct {
     fn ty(self: *Compiler, parent: *const Shape, t: parse.Type) Err!Type {
         switch (t) {
             .named => |name| {
-                if (std.mem.eql(u8, name, "byte"))
-                    return .byte;
-                if (std.mem.eql(u8, name, "int"))
-                    return .int;
-                if (std.mem.eql(u8, name, "real"))
-                    return .real;
-                if (parent.aliases.get(name)) |alias|
-                    return alias;
-                if (self.root.aliases.get(name)) |alias|
-                    return alias;
-                if (parent.shapes.get(name)) |sh|
-                    return .{ .shape = sh };
-                if (self.root.shapes.get(name)) |sh|
-                    return .{ .shape = sh };
+                if (self.getType(parent, name)) |typ|
+                    return typ;
                 try self.errors.append(.{ .unknown_type = name });
                 return .err;
             },
             .array => |arr| {
                 const subty = try self.ty(parent, arr.ty.*);
-                var alloced: *Type = try self.alloc().create(Type);
-                errdefer self.alloc().destroy(alloced);
+                var alloced: *Type = try self.alloc.create(Type);
+                errdefer self.alloc.destroy(alloced);
                 alloced.* = subty;
                 if (arr.len) |len_expr| {
                     const len = try self.valueAsNum(try self.expr(parent, len_expr));
@@ -151,6 +195,18 @@ const Compiler = struct {
             return fld;
         if (self.root.fields.get(name)) |fld|
             return fld;
+        return null;
+    }
+
+    fn getType(self: *const Compiler, parent: *const Shape, name: []const u8) ?Type {
+        if (parent.aliases.get(name)) |alias|
+            return alias;
+        if (self.root.aliases.get(name)) |alias|
+            return alias;
+        if (parent.shapes.getPtr(name)) |sh|
+            return .{ .shape = sh };
+        if (self.root.shapes.getPtr(name)) |sh|
+            return .{ .shape = sh };
         return null;
     }
 
