@@ -78,12 +78,12 @@ pub const Field = struct {
 };
 pub const Type = union(enum) {
     named: Sp([]const u8),
-    array: struct { len: ?Expr, ty: *Type },
+    array: struct { len: Expr, ty: *Type },
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
             .named => |name| try writer.print("{s}", .{name.val}),
-            .array => |array| if (array.len) |len| try writer.print("[{}]{}", .{ len, array.ty }) else try writer.print("[]{}", .{array.ty}),
+            .array => |array| try writer.print("[{}]{}", .{ array.len, array.ty }),
         }
     }
 };

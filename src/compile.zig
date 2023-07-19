@@ -227,12 +227,8 @@ const Compiler = struct {
                 var alloced: *Type = try self.alloc.create(Type);
                 errdefer self.alloc.destroy(alloced);
                 alloced.* = subty;
-                if (arr.len) |len_expr| {
-                    const len = try self.numExpr(parent, len_expr);
-                    return .{ .array = .{ .len = @intFromFloat(len), .type = alloced } };
-                } else {
-                    return .{ .slice = .{ .type = alloced } };
-                }
+                const len = try self.numExpr(parent, arr.len);
+                return .{ .array = .{ .len = @intFromFloat(len), .type = alloced } };
             },
         }
     }
