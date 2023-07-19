@@ -28,4 +28,7 @@ pub fn main() !void {
 
     const compiled = compile.compile(ast);
     defer compiled.deinit();
+
+    for (compiled.errors.items) |err|
+        std.debug.print("{}\n", .{err});
 }

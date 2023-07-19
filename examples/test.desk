@@ -1,5 +1,4 @@
 shape Person {
-    shape Name [30]byte
     name Name origin;
     age int name:x;
 }
