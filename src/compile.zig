@@ -1,11 +1,14 @@
 const std = @import("std");
 const parse = @import("parse.zig");
+const lex = @import("lex.zig");
 const Axis = parse.Axis;
+const Span = lex.Span;
 
 const Vec = packed struct(u63) {
     x: u21,
     y: u21,
     z: u21,
+    pub const zero: @This() = .{ .x = 0, .y = 0, .z = 0 };
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{{{} {} {}}}", .{ self.x, self.y, self.z });
     }
@@ -14,6 +17,7 @@ const FVec = struct {
     x: f64,
     y: f64,
     z: f64,
+    pub const zero: @This() = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         try writer.print("{{{} {} {}}}", .{ self.x, self.y, self.z });
     }
@@ -23,12 +27,14 @@ const Shape = struct {
     shapes: std.StringHashMap(Shape),
     fields: std.StringHashMap(Field),
     aliases: std.StringHashMap(Type),
+    size: Vec,
 
     fn init(alloc: std.mem.Allocator) Shape {
         return .{
             .shapes = std.StringHashMap(Shape).init(alloc),
             .fields = std.StringHashMap(Field).init(alloc),
             .aliases = std.StringHashMap(Type).init(alloc),
+            .size = Vec.zero,
         };
     }
 
@@ -161,9 +167,9 @@ const Compiler = struct {
     fn ty(self: *Compiler, parent: *const Shape, t: parse.Type) Err!Type {
         switch (t) {
             .named => |name| {
-                if (self.getType(parent, name)) |typ|
+                if (self.getType(parent, name.val)) |typ|
                     return typ;
-                try self.errors.append(.{ .unknown_type = name });
+                try self.errors.append(.{ .kind = .{ .unknown_type = name.val }, .span = name.span });
                 return .err;
             },
             .array => |arr| {
@@ -172,7 +178,7 @@ const Compiler = struct {
                 errdefer self.alloc.destroy(alloced);
                 alloced.* = subty;
                 if (arr.len) |len_expr| {
-                    const len = try self.valueAsNum(try self.expr(parent, len_expr));
+                    const len = try self.numExpr(parent, len_expr);
                     return .{ .array = .{ .len = @intFromFloat(len), .type = alloced } };
                 } else {
                     return .{ .slice = .{ .type = alloced } };
@@ -184,7 +190,7 @@ const Compiler = struct {
     fn field(self: *Compiler, parent: *Shape, fld: parse.Field) Err!void {
         var f = Field{
             .type = try self.ty(parent, fld.ty),
-            .start = Vec{ .x = 0, .y = 0, .z = 0 },
+            .start = try self.valueAsVec(try self.expr(parent, fld.start), fld.start.span()),
             .axis = fld.axis orelse .x,
         };
         try parent.fields.put(fld.name, f);
@@ -210,34 +216,56 @@ const Compiler = struct {
         return null;
     }
 
-    fn valueAsNum(self: *Compiler, val: Value) Err!f64 {
+    fn valueAsNum(self: *Compiler, val: Value, span: Span) Err!f64 {
         switch (val) {
             .num => |n| return n,
             .vec => {
-                try self.errors.append(.{ .expected_num = val });
-                return error.err;
+                try self.errors.append(.{ .kind = .{ .expected_num = val }, .span = span });
+                return 0.0;
             },
+            .err => return 0.0,
         }
+    }
+
+    fn valueAsVec(self: *Compiler, val: Value, span: Span) Err!Vec {
+        switch (val) {
+            .num => {
+                try self.errors.append(.{ .kind = .{ .expected_vec = val }, .span = span });
+                return Vec.zero;
+            },
+            .vec => |v| return .{
+                .x = @intFromFloat(v.x),
+                .y = @intFromFloat(v.y),
+                .z = @intFromFloat(v.z),
+            },
+            .err => return Vec.zero,
+        }
+    }
+
+    fn numExpr(self: *Compiler, parent: *const Shape, ex: parse.Expr) Err!f64 {
+        return self.valueAsNum(try self.expr(parent, ex), ex.span());
     }
 
     fn expr(self: *Compiler, parent: *const Shape, ex: parse.Expr) Err!Value {
         switch (ex) {
-            .num => |num| return .{ .num = num },
+            .num => |num| return .{ .num = num.val },
             .vec => |vec| {
-                const x = try self.valueAsNum(try self.expr(parent, vec.x));
-                const y = try self.valueAsNum(try self.expr(parent, vec.y));
-                const z = try self.valueAsNum(try self.expr(parent, vec.z));
+                const x = try self.numExpr(parent, vec.x);
+                const y = try self.numExpr(parent, vec.y);
+                const z = try self.numExpr(parent, vec.z);
                 return .{ .vec = .{ .x = x, .y = y, .z = z } };
             },
             .ident => |ident| {
-                if (self.getField(parent, ident)) |fld|
+                if (std.mem.eql(u8, ident.val, "origin"))
+                    return .{ .vec = FVec.zero };
+                if (self.getField(parent, ident.val)) |fld|
                     return .{ .vec = .{
                         .x = @floatFromInt(fld.start.x),
                         .y = @floatFromInt(fld.start.y),
                         .z = @floatFromInt(fld.start.z),
                     } };
-                try self.errors.append(.{ .unknown_ident = ident });
-                return error.err;
+                try self.errors.append(.{ .kind = .{ .unknown_ident = ident.val }, .span = ident.span });
+                return .err;
             },
             .typed_len => |ident| {
                 _ = ident;
@@ -275,6 +303,7 @@ const Compiler = struct {
                             .z => return .{ .vec = .{ .x = 0, .y = 0, .z = vec.z } },
                         }
                     },
+                    .err => return .err,
                 };
             },
         }
@@ -284,17 +313,21 @@ const Compiler = struct {
 pub const Value = union(enum) {
     num: f64,
     vec: FVec,
+    err,
 
     fn binOp(self: Value, other: Value, comptime f: fn (f64, f64) f64) Value {
         return switch (self) {
             .num => |a| switch (other) {
                 .num => |b| .{ .num = f(a, b) },
                 .vec => |b| .{ .vec = .{ .x = f(a, b.x), .y = f(a, b.y), .z = f(a, b.z) } },
+                .err => .err,
             },
             .vec => |a| switch (other) {
                 .num => |b| .{ .vec = .{ .x = f(a.x, b), .y = f(a.y, b), .z = f(a.z, b) } },
                 .vec => |b| .{ .vec = .{ .x = f(a.x, b.x), .y = f(a.y, b.y), .z = f(a.z, b.z) } },
+                .err => .err,
             },
+            .err => .err,
         };
     }
 
@@ -302,6 +335,7 @@ pub const Value = union(enum) {
         switch (self) {
             .num => |n| try writer.print("{}", .{n}),
             .vec => |v| try writer.print("{{{} {} {}}}", .{ v.x, v.y, v.z }),
+            .err => try writer.print("<error>", .{}),
         }
     }
 };
@@ -319,16 +353,27 @@ fn div(a: f64, b: f64) f64 {
     return a / b;
 }
 
-pub const CompileError = union(enum) {
+pub const CompileErrorKind = union(enum) {
     unknown_type: []const u8,
     unknown_ident: []const u8,
     expected_num: Value,
+    expected_vec: Value,
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
             .unknown_type => |name| try writer.print("unknown type: {s}", .{name}),
             .unknown_ident => |name| try writer.print("unknown ident: {s}", .{name}),
             .expected_num => |val| try writer.print("expected number, got {}", .{val}),
+            .expected_vec => |val| try writer.print("expected vector, got {}", .{val}),
         }
+    }
+};
+
+pub const CompileError = struct {
+    kind: CompileErrorKind,
+    span: Span,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        try writer.print("{}: {}", .{ self.span, self.kind });
     }
 };

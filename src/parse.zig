@@ -77,12 +77,12 @@ pub const Field = struct {
     }
 };
 pub const Type = union(enum) {
-    named: []const u8,
+    named: Sp([]const u8),
     array: struct { len: ?Expr, ty: *Type },
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
-            .named => try writer.print("{s}", .{self.named}),
+            .named => |name| try writer.print("{s}", .{name.val}),
             .array => |array| if (array.len) |len| try writer.print("[{}]{}", .{ len, array.ty }) else try writer.print("[]{}", .{array.ty}),
         }
     }
@@ -130,10 +130,10 @@ pub const Call = struct {
 
 // Expressions
 pub const Expr = union(enum) {
-    ident: []const u8,
-    raw_len: []const u8,
-    typed_len: []const u8,
-    num: f64,
+    ident: Sp([]const u8),
+    raw_len: Sp([]const u8),
+    typed_len: Sp([]const u8),
+    num: Sp(f64),
     vec: *VecExpr,
     bin: *BinExpr,
     axis: *AxisExpr,
@@ -141,15 +141,28 @@ pub const Expr = union(enum) {
 
     pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
         switch (self) {
-            .ident => try writer.print("{s}", .{self.ident}),
-            .raw_len => try writer.print("@{s}", .{self.raw_len}),
-            .typed_len => try writer.print("#{s}", .{self.typed_len}),
+            .ident => try writer.print("{s}", .{self.ident.val}),
+            .raw_len => try writer.print("@{s}", .{self.raw_len.val}),
+            .typed_len => try writer.print("#{s}", .{self.typed_len.val}),
             .num => try writer.print("{d}", .{self.num}),
             .vec => try writer.print("{}", .{self.vec}),
             .bin => try writer.print("{}", .{self.bin}),
             .axis => try writer.print("{}", .{self.axis}),
             .paren => try writer.print("({})", .{self.paren}),
         }
+    }
+
+    pub fn span(self: @This()) Span {
+        return switch (self) {
+            .ident => |ident| ident.span,
+            .raw_len => |raw_len| raw_len.span,
+            .typed_len => |typed_len| typed_len.span,
+            .num => |num| num.span,
+            .vec => |vec| vec.x.span().merge(vec.z.span()),
+            .bin => |bin| bin.lhs.span().merge(bin.rhs.span()),
+            .axis => |axis| axis.vec.span(),
+            .paren => |paren| paren.span(),
+        };
     }
 };
 pub const VecExpr = struct {
@@ -274,7 +287,7 @@ const Parser = struct {
     }
     fn tryType(self: *Parser) Err!?Type {
         if (self.tryIdent()) |ident|
-            return .{ .named = ident.val };
+            return .{ .named = ident };
         if (self.tryExact(.open_bracket)) |_| {
             const len = try self.expectExpr();
             _ = try self.expect(.close_bracket, &.{});
@@ -378,9 +391,9 @@ const Parser = struct {
 
     fn tryTerm(self: *Parser) Err!?Expr {
         if (self.tryIdent()) |ident|
-            return .{ .ident = ident.val };
+            return .{ .ident = ident };
         if (try self.tryNum(f64, 0.0)) |num|
-            return .{ .num = num.val };
+            return .{ .num = num };
         if (try self.tryVec()) |vec| {
             const alloced = try self.alloc.create(VecExpr);
             alloced.* = vec;
@@ -388,11 +401,11 @@ const Parser = struct {
         }
         if (self.tryExact(.octothorpe)) |_| {
             const name = try self.expectIdent(.name);
-            return .{ .typed_len = name.val };
+            return .{ .typed_len = name };
         }
         if (self.tryExact(.at)) |_| {
             const name = try self.expectIdent(.name);
-            return .{ .raw_len = name.val };
+            return .{ .raw_len = name };
         }
         if (self.tryExact(.open_paren)) |_| {
             const expr = try self.expectExpr();
@@ -463,7 +476,7 @@ const Parser = struct {
         switch (token.tag) {
             .ident => {
                 self.curr_token += 1;
-                return token.span.sp([]const u8, token.span.str());
+                return .{ .val = token.span.str(), .span = token.span };
             },
             else => return null,
         }
@@ -485,7 +498,7 @@ const Parser = struct {
                     break :blk default;
                 };
                 self.curr_token += 1;
-                return token.span.sp(T, n);
+                return .{ .val = n, .span = token.span };
             },
             else => return null,
         }
@@ -519,7 +532,7 @@ const Parser = struct {
                     else => return null,
                 };
                 self.curr_token += 1;
-                return token.span.sp(Axis, axis);
+                return .{ .val = axis, .span = token.span };
             },
             else => return null,
         }

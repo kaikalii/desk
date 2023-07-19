@@ -41,10 +41,6 @@ pub const Span = struct {
         return Loc.inSrc(self.src, self.start);
     }
 
-    pub fn sp(self: @This(), comptime T: type, val: T) Sp(T) {
-        return .{ .val = val, .span = self };
-    }
-
     pub fn merge(self: @This(), other: Span) Span {
         return .{
             .start = self.start,
